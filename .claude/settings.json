@@ -1,0 +1,33 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "script=\"$CLAUDE_PROJECT_DIR/.claude/hooks/scripts/wiki_session_start.py\"; if test -f \"$script\"; then python3 \"$script\" wiki-index; else echo '{}'; fi",
+            "timeout": 5,
+            "statusMessage": "Loading wiki index..."
+          },
+          {
+            "type": "command",
+            "command": "script=\"$CLAUDE_PROJECT_DIR/.claude/hooks/scripts/wiki_session_start.py\"; if test -f \"$script\"; then python3 \"$script\" git-context; else echo '{}'; fi",
+            "timeout": 5,
+            "statusMessage": "Loading git context..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "script=\"$CLAUDE_PROJECT_DIR/.claude/hooks/scripts/wiki_stop_hook.py\"; if test -f \"$script\"; then python3 \"$script\"; else echo '{}'; fi",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]
+  }
+}

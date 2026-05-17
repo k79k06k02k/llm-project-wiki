@@ -1,0 +1,232 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CLAUDE_HOOK="$ROOT_DIR/.claude/hooks/scripts/wiki_stop_hook.py"
+CODEX_HOOK="$ROOT_DIR/.codex/hooks/scripts/wiki_stop_hook.py"
+
+run_case() {
+  local name="$1"
+  local hook="$2"
+  local input="$3"
+  local expected="$4"
+  local output
+  local exit_code
+
+  set +e
+  output="$(printf '%s' "$input" | python3 "$hook")"
+  exit_code="$?"
+  set -e
+
+  if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: $name exited with $exit_code"
+    exit 1
+  fi
+
+  if [ "$expected" = "block" ] && [[ "$output" != *'"decision": "block"'* ]]; then
+    echo "FAIL: $name expected block, got: $output"
+    exit 1
+  fi
+
+  if [ "$expected" = "allow" ] && [ -n "$output" ]; then
+    echo "FAIL: $name expected allow, got: $output"
+    exit 1
+  fi
+
+  echo "PASS: $name"
+}
+
+LONG_MESSAGE="$(python3 - <<'PY'
+print("This is a substantial response. " * 60)
+PY
+)"
+SESSION_PREFIX="smoke-$(date +%s)-$$"
+
+run_case "short response is allowed" \
+  "$CLAUDE_HOOK" \
+  "{\"session_id\":\"$SESSION_PREFIX-short\",\"last_assistant_message\":\"Done.\"}" \
+  "allow"
+
+run_case "long response without marker is blocked" \
+  "$CLAUDE_HOOK" \
+  "{\"session_id\":\"$SESSION_PREFIX-long\",\"last_assistant_message\":\"$LONG_MESSAGE\"}" \
+  "block"
+
+run_case "wiki suggestion marker is allowed" \
+  "$CLAUDE_HOOK" \
+  "{\"session_id\":\"$SESSION_PREFIX-suggestion\",\"last_assistant_message\":\"Wiki suggestion: update architecture notes.\"}" \
+  "allow"
+
+run_case "no updates marker is allowed" \
+  "$CLAUDE_HOOK" \
+  "{\"session_id\":\"$SESSION_PREFIX-none\",\"last_assistant_message\":\"No wiki updates needed\"}" \
+  "allow"
+
+run_case "codex hook blocks long response without marker" \
+  "$CODEX_HOOK" \
+  "{\"session_id\":\"$SESSION_PREFIX-codex-long\",\"last_assistant_message\":\"$LONG_MESSAGE\"}" \
+  "block"
+
+echo
+echo "All hook smoke tests passed."
+
+empty_target="$(mktemp -d)"
+existing_target="$(mktemp -d)"
+trap 'rm -rf "$empty_target" "$existing_target"' EXIT
+
+git -C "$empty_target" init >/dev/null
+"$ROOT_DIR/scripts/install.sh" "$empty_target" >/tmp/llm-project-wiki-install-empty.log
+test -f "$empty_target/.claude/settings.json"
+test -f "$empty_target/.claude/hooks/scripts/wiki_session_start.py"
+test -f "$empty_target/.claude/hooks/scripts/wiki_stop_hook.py"
+test -f "$empty_target/.codex/hooks.json"
+test -f "$empty_target/.codex/hooks/scripts/wiki_session_start.py"
+test -f "$empty_target/.codex/hooks/scripts/wiki_stop_hook.py"
+test -f "$empty_target/.agents/skills/wiki-review/SKILL.md"
+test -f "$empty_target/.agents/skills/wiki-review/agents/openai.yaml"
+test ! -e "$empty_target/.codex/skills/wiki-review/SKILL.md"
+python3 -m json.tool "$empty_target/.claude/settings.json" >/dev/null
+python3 -m json.tool "$empty_target/.codex/hooks.json" >/dev/null
+
+claude_session_start_index_cmd="$(python3 - "$empty_target/.claude/settings.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+hooks = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+print(hooks["hooks"]["SessionStart"][0]["hooks"][0]["command"])
+PY
+)"
+
+claude_session_start_git_cmd="$(python3 - "$empty_target/.claude/settings.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+hooks = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+print(hooks["hooks"]["SessionStart"][0]["hooks"][1]["command"])
+PY
+)"
+
+codex_session_start_index_cmd="$(python3 - "$empty_target/.codex/hooks.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+hooks = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+print(hooks["hooks"]["SessionStart"][0]["hooks"][0]["command"])
+PY
+)"
+
+codex_session_start_git_cmd="$(python3 - "$empty_target/.codex/hooks.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+hooks = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+print(hooks["hooks"]["SessionStart"][0]["hooks"][1]["command"])
+PY
+)"
+
+codex_stop_cmd="$(python3 - "$empty_target/.codex/hooks.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+hooks = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+print(hooks["hooks"]["Stop"][0]["hooks"][0]["command"])
+PY
+)"
+
+test "$(cd "$empty_target/wiki" && CLAUDE_PROJECT_DIR="$empty_target" sh -c "$claude_session_start_index_cmd" | python3 -c 'import json,sys; print("Project wiki index:" in json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"])')" = "True"
+test "$(cd "$empty_target/wiki" && CLAUDE_PROJECT_DIR="$empty_target" sh -c "$claude_session_start_git_cmd" | python3 -c 'import json,sys; print("Git status:" in json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"])')" = "True"
+test "$(cd "$empty_target/wiki" && sh -c "$codex_session_start_index_cmd" | python3 -c 'import json,sys; print("Project wiki index:" in json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"])')" = "True"
+test "$(cd "$empty_target/wiki" && sh -c "$codex_session_start_git_cmd" | python3 -c 'import json,sys; print("Git status:" in json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"])')" = "True"
+test "$(cd "$empty_target/wiki" && printf '%s' "{\"session_id\":\"$SESSION_PREFIX-installed-codex\",\"last_assistant_message\":\"$LONG_MESSAGE\"}" | sh -c "$codex_stop_cmd" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("decision"))')" = "block"
+
+echo "PASS: installed Claude and Codex session hooks run from a project subdirectory"
+
+git -C "$existing_target" init >/dev/null
+mkdir -p "$existing_target/.claude" "$existing_target/.codex" "$existing_target/wiki"
+cat >"$existing_target/.claude/settings.json" <<'JSON'
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo existing",
+            "timeout": 1
+          }
+        ]
+      }
+    ]
+  }
+}
+JSON
+cat >"$existing_target/.codex/hooks.json" <<'JSON'
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo existing codex",
+            "timeout": 1
+          }
+        ]
+      }
+    ]
+  }
+}
+JSON
+printf 'existing index\n' >"$existing_target/wiki/index.md"
+
+"$ROOT_DIR/scripts/install.sh" "$existing_target" >/tmp/llm-project-wiki-install-existing.log
+
+python3 - "$existing_target/.claude/settings.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+settings = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+commands = []
+for event_entries in settings.get("hooks", {}).values():
+    for event_entry in event_entries:
+        for hook in event_entry.get("hooks", []):
+            commands.append(hook.get("command", ""))
+
+assert any(command == "echo existing" for command in commands)
+assert any("wiki_stop_hook.py" in command for command in commands)
+assert any("wiki_session_start.py" in command for command in commands)
+PY
+
+test "$(cat "$existing_target/wiki/index.md")" = "existing index"
+ls "$existing_target/.claude"/settings.json.bak.* >/dev/null
+
+echo "PASS: install script preserves existing files and merges Claude hooks"
+
+python3 - "$existing_target/.codex/hooks.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+settings = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+commands = []
+for event_entries in settings.get("hooks", {}).values():
+    for event_entry in event_entries:
+        for hook in event_entry.get("hooks", []):
+            commands.append(hook.get("command", ""))
+
+assert any(command == "echo existing codex" for command in commands)
+assert any(".codex/hooks/scripts/wiki_stop_hook.py" in command for command in commands)
+assert any(".codex/hooks/scripts/wiki_session_start.py" in command for command in commands)
+PY
+
+ls "$existing_target/.codex"/hooks.json.bak.* >/dev/null
+
+echo "PASS: install script preserves existing files and merges Codex hooks"
+echo
+echo "All smoke tests passed."

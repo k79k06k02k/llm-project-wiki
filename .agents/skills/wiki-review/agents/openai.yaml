@@ -1,0 +1,8 @@
+interface:
+  display_name: "Wiki Review"
+  short_description: "Review durable project wiki updates"
+  brand_color: "#0447FF"
+  default_prompt: "Use $wiki-review to decide whether this session produced durable project knowledge worth recording."
+
+policy:
+  allow_implicit_invocation: true
