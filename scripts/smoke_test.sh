@@ -10,6 +10,7 @@ run_case() {
   local hook="$2"
   local input="$3"
   local expected="$4"
+  local expected_text="${5:-}"
   local output
   local exit_code
 
@@ -25,6 +26,11 @@ run_case() {
 
   if [ "$expected" = "block" ] && [[ "$output" != *'"decision": "block"'* ]]; then
     echo "FAIL: $name expected block, got: $output"
+    exit 1
+  fi
+
+  if [ -n "$expected_text" ] && [[ "$output" != *"$expected_text"* ]]; then
+    echo "FAIL: $name expected output to contain '$expected_text', got: $output"
     exit 1
   fi
 
@@ -65,7 +71,13 @@ run_case "no updates marker is allowed" \
 run_case "codex hook blocks long response without marker" \
   "$CODEX_HOOK" \
   "{\"session_id\":\"$SESSION_PREFIX-codex-long\",\"last_assistant_message\":\"$LONG_MESSAGE\"}" \
-  "block"
+  "block" \
+  "Missing wiki evaluation marker"
+
+run_case "codex hook allows hidden no-updates marker" \
+  "$CODEX_HOOK" \
+  "{\"session_id\":\"$SESSION_PREFIX-codex-hidden\",\"last_assistant_message\":\"Completed the work. <!-- No wiki updates needed -->\"}" \
+  "allow"
 
 echo
 echo "All hook smoke tests passed."
@@ -140,7 +152,7 @@ PY
 
 test "$(cd "$empty_target/wiki" && CLAUDE_PROJECT_DIR="$empty_target" sh -c "$claude_session_start_index_cmd" | python3 -c 'import json,sys; print("Project wiki index:" in json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"])')" = "True"
 test "$(cd "$empty_target/wiki" && CLAUDE_PROJECT_DIR="$empty_target" sh -c "$claude_session_start_git_cmd" | python3 -c 'import json,sys; print("Git status:" in json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"])')" = "True"
-test "$(cd "$empty_target/wiki" && sh -c "$codex_session_start_index_cmd" | python3 -c 'import json,sys; print("Project wiki index:" in json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"])')" = "True"
+test "$(cd "$empty_target/wiki" && sh -c "$codex_session_start_index_cmd" | python3 -c 'import json,sys; text=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; print("Project wiki index:" in text and "<!-- No wiki updates needed -->" in text)')" = "True"
 test "$(cd "$empty_target/wiki" && sh -c "$codex_session_start_git_cmd" | python3 -c 'import json,sys; print("Git status:" in json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"])')" = "True"
 test "$(cd "$empty_target/wiki" && printf '%s' "{\"session_id\":\"$SESSION_PREFIX-installed-codex\",\"last_assistant_message\":\"$LONG_MESSAGE\"}" | sh -c "$codex_stop_cmd" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("decision"))')" = "block"
 

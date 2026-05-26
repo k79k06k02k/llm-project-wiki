@@ -60,7 +60,16 @@ def main() -> None:
         if not index_path.is_file():
             print("{}")
             return
-        emit_context(f"Project wiki index:\n\n{index_path.read_text(encoding='utf-8')}")
+        emit_context(
+            "Project wiki index:\n\n"
+            f"{index_path.read_text(encoding='utf-8')}\n\n"
+            "Codex wiki review rule: every substantial final response must "
+            "evaluate whether the conversation produced durable project "
+            "knowledge. If yes, include a visible `Wiki suggestion`. If no, "
+            "append hidden marker `<!-- No wiki updates needed -->` so the "
+            "Stop hook can verify the check without adding visible transcript "
+            "noise."
+        )
         return
 
     if mode == "git-context":

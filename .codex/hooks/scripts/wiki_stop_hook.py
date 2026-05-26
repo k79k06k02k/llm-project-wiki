@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""Enforce a lightweight wiki evaluation at Codex Stop time.
+"""Enforce a lightweight wiki evaluation marker at Codex Stop time.
 
-The hook allows trivial responses, but blocks substantial responses that do
-not contain one of the wiki evaluation markers:
+Normal responses should include one of these markers:
 
-- Wiki suggestion
-- No wiki updates needed
+- visible `Wiki suggestion` when durable project knowledge should be recorded
+- hidden `<!-- No wiki updates needed -->` when there is nothing to record
 
-The block is not a write operation. It only asks the agent to decide whether
-the session produced durable knowledge worth proposing for the project wiki.
+The hook only blocks when a substantial response forgets the marker. This keeps
+the regular transcript clean while preserving the wiki review gate.
 """
 
 import json
@@ -22,7 +21,7 @@ WIKI_EVAL_PATTERN = re.compile(
 )
 
 TRIVIAL_THRESHOLD = 800
-MAX_BLOCKS_PER_TURN = 2
+MAX_BLOCKS_PER_TURN = 1
 
 
 def get_state_file(session_id: str) -> str:
@@ -70,11 +69,9 @@ def main() -> None:
     write_state(session_id, state)
 
     reason = (
-        "Wiki evaluation: quickly assess whether this response contains "
-        "knowledge worth recording in the project wiki.\n"
-        '- If yes: propose using the "Wiki suggestion" format\n'
-        '- If no: output the exact phrase "No wiki updates needed" so the hook '
-        "knows the evaluation was performed"
+        "Missing wiki evaluation marker. Add a visible `Wiki suggestion` if "
+        "durable project knowledge should be recorded; otherwise add hidden "
+        "`<!-- No wiki updates needed -->` at the end of the response."
     )
     print(json.dumps({"decision": "block", "reason": reason}))
 

@@ -88,7 +88,7 @@ Codex discovers repository skills from `.agents/skills`. The checked-in `.agents
 2. The agent reads relevant wiki pages before editing related code.
 3. During work, the agent may propose a `Wiki suggestion` when it discovers durable knowledge.
 4. At the end of substantial work, the stop hook checks whether the agent performed a wiki evaluation.
-5. The agent either proposes a `Wiki suggestion` or says `No wiki updates needed`.
+5. The agent either proposes a `Wiki suggestion` or marks that no wiki update is needed. In Codex, use hidden `<!-- No wiki updates needed -->` to keep the rendered conversation clean.
 6. Human approval is required before any wiki file is created, updated, or deleted.
 
 This keeps the system boring and auditable. Boring is good here. Unreviewed AI memory is just a more confident way to store mistakes.
@@ -112,7 +112,7 @@ The stop hook looks for either marker in the final assistant response:
 - `Wiki suggestion`
 - `No wiki updates needed`
 
-If the response is substantial and neither marker appears, the hook blocks the stop and asks the agent to perform a quick wiki evaluation.
+In Codex, prefer the hidden Markdown comment `<!-- No wiki updates needed -->` when there is nothing to record. If the response is substantial and neither marker appears, the hook blocks the stop with a short missing-marker message.
 
 ## Smoke Test
 
