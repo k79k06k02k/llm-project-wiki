@@ -66,9 +66,7 @@ def main() -> None:
             "Codex wiki review rule: every substantial final response must "
             "evaluate whether the conversation produced durable project "
             "knowledge. If yes, include a visible `Wiki suggestion`. If no, "
-            "append hidden marker `<!-- No wiki updates needed -->` so the "
-            "Stop hook can verify the check without adding visible transcript "
-            "noise."
+            "do not add a visible no-op marker; keep the transcript clean."
         )
         return
 

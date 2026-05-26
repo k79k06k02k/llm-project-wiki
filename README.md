@@ -14,7 +14,7 @@ The point is not to create another documentation folder. The point is to make pr
 
 - A `wiki/` directory for git-tracked project knowledge.
 - A `SessionStart` hook that loads the wiki index into Claude Code or Codex context.
-- A `Stop` hook that nudges the agent to evaluate whether the conversation produced wiki-worthy knowledge.
+- A Claude Code `Stop` hook that nudges the agent to evaluate whether the conversation produced wiki-worthy knowledge.
 - A repo-scoped `wiki-review` skill for manual review and suggestion flow.
 - A human approval rule so the agent proposes wiki updates instead of silently rewriting the knowledge base.
 - A small install script for copying the template into another repository.
@@ -69,7 +69,7 @@ Please integrate LLM Project Wiki into the current project: https://github.com/k
 Run `scripts/install.sh` from that repository.
 ```
 
-Then open the target project with Claude Code or Codex. On session start, the agent should receive the wiki index as additional context. At the end of substantial responses, the stop hook asks the agent to perform a wiki evaluation unless it already did.
+Then open the target project with Claude Code or Codex. On session start, the agent should receive the wiki index as additional context. Claude Code uses a blocking stop hook for substantial responses; Codex keeps the stop hook non-blocking and relies on injected instructions so the transcript is not polluted by hook feedback.
 
 The installer is designed for existing projects:
 
@@ -87,8 +87,8 @@ Codex discovers repository skills from `.agents/skills`. The checked-in `.agents
 1. `wiki/index.md` is loaded at the start of an agent session.
 2. The agent reads relevant wiki pages before editing related code.
 3. During work, the agent may propose a `Wiki suggestion` when it discovers durable knowledge.
-4. At the end of substantial work, the stop hook checks whether the agent performed a wiki evaluation.
-5. The agent either proposes a `Wiki suggestion` or marks that no wiki update is needed. In Codex, use hidden `<!-- No wiki updates needed -->` to keep the rendered conversation clean.
+4. At the end of substantial work, the agent evaluates whether the session produced wiki-worthy knowledge.
+5. The agent proposes a `Wiki suggestion` when there is durable knowledge to record. In Codex, do not add no-op markers solely for the hook; keep the transcript clean.
 6. Human approval is required before any wiki file is created, updated, or deleted.
 
 This keeps the system boring and auditable. Boring is good here. Unreviewed AI memory is just a more confident way to store mistakes.
@@ -107,12 +107,12 @@ Do not record everything. Small one-file fixes usually do not need a wiki page.
 
 ## Hook Markers
 
-The stop hook looks for either marker in the final assistant response:
+The Claude Code stop hook looks for either marker in the final assistant response:
 
 - `Wiki suggestion`
 - `No wiki updates needed`
 
-In Codex, prefer the hidden Markdown comment `<!-- No wiki updates needed -->` when there is nothing to record. If the response is substantial and neither marker appears, the hook blocks the stop with a short missing-marker message.
+Codex does not block on missing markers. Codex renders stop-hook blocks as visible Hook feedback and can create marker-only follow-up messages, so the Codex stop hook is intentionally non-blocking.
 
 ## Smoke Test
 
@@ -125,7 +125,8 @@ Run:
 The smoke test verifies that:
 
 - Stop hooks allow short responses.
-- Stop hooks block substantial responses without a wiki marker.
+- Claude Code stop hook blocks substantial responses without a wiki marker.
+- Codex stop hook allows substantial responses without emitting Hook feedback.
 - Stop hooks allow responses containing `Wiki suggestion`.
 - Stop hooks allow responses containing `No wiki updates needed`.
 - The installer creates Claude Code hooks, Codex hooks, and repo-scoped Codex skill files in a fresh target.

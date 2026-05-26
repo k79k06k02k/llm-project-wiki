@@ -68,11 +68,10 @@ run_case "no updates marker is allowed" \
   "{\"session_id\":\"$SESSION_PREFIX-none\",\"last_assistant_message\":\"No wiki updates needed\"}" \
   "allow"
 
-run_case "codex hook blocks long response without marker" \
+run_case "codex hook allows long response without marker" \
   "$CODEX_HOOK" \
   "{\"session_id\":\"$SESSION_PREFIX-codex-long\",\"last_assistant_message\":\"$LONG_MESSAGE\"}" \
-  "block" \
-  "Missing wiki evaluation marker"
+  "allow"
 
 run_case "codex hook allows hidden no-updates marker" \
   "$CODEX_HOOK" \
@@ -152,9 +151,9 @@ PY
 
 test "$(cd "$empty_target/wiki" && CLAUDE_PROJECT_DIR="$empty_target" sh -c "$claude_session_start_index_cmd" | python3 -c 'import json,sys; print("Project wiki index:" in json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"])')" = "True"
 test "$(cd "$empty_target/wiki" && CLAUDE_PROJECT_DIR="$empty_target" sh -c "$claude_session_start_git_cmd" | python3 -c 'import json,sys; print("Git status:" in json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"])')" = "True"
-test "$(cd "$empty_target/wiki" && sh -c "$codex_session_start_index_cmd" | python3 -c 'import json,sys; text=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; print("Project wiki index:" in text and "<!-- No wiki updates needed -->" in text)')" = "True"
+test "$(cd "$empty_target/wiki" && sh -c "$codex_session_start_index_cmd" | python3 -c 'import json,sys; text=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; print("Project wiki index:" in text and "do not add a visible no-op marker" in text)')" = "True"
 test "$(cd "$empty_target/wiki" && sh -c "$codex_session_start_git_cmd" | python3 -c 'import json,sys; print("Git status:" in json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"])')" = "True"
-test "$(cd "$empty_target/wiki" && printf '%s' "{\"session_id\":\"$SESSION_PREFIX-installed-codex\",\"last_assistant_message\":\"$LONG_MESSAGE\"}" | sh -c "$codex_stop_cmd" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("decision"))')" = "block"
+test "$(cd "$empty_target/wiki" && printf '%s' "{\"session_id\":\"$SESSION_PREFIX-installed-codex\",\"last_assistant_message\":\"$LONG_MESSAGE\"}" | sh -c "$codex_stop_cmd")" = ""
 
 echo "PASS: installed Claude and Codex session hooks run from a project subdirectory"
 

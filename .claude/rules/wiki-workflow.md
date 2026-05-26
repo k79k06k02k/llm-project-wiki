@@ -19,7 +19,9 @@ The project keeps a shared, git-tracked wiki in `wiki/`. The AI agent may propos
 
 Codex can run the same wiki flow through `.codex/hooks.json`.
 The Codex implementation uses `SessionStart` to load `wiki/index.md` and git context,
-then uses `Stop` to require one of the wiki evaluation markers before ending substantial replies.
+then leaves `Stop` non-blocking. Codex Stop hook blocks are rendered as visible
+Hook feedback and can create marker-only follow-up messages, so wiki self-review
+is handled through instructions instead of a Stop-time gate.
 
 Codex-specific details:
 
@@ -53,12 +55,12 @@ Do not create, update, or delete wiki pages until the user approves.
 
 ## Stop Hook Markers
 
-The Stop hook checks whether wiki evaluation happened by scanning for one of these markers:
+The Claude Stop hook checks whether wiki evaluation happened by scanning for one of these markers:
 
 - `Wiki suggestion`
 - `No wiki updates needed`
 
-Use `Wiki suggestion` when proposing an update. Use `No wiki updates needed` when the session produced no durable wiki-worthy knowledge.
+Use `Wiki suggestion` when proposing an update. Use `No wiki updates needed` when the session produced no durable wiki-worthy knowledge. In Codex, do not add no-op markers solely for the hook; keep the transcript clean.
 
 ## Page Format
 
