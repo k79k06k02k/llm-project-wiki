@@ -137,6 +137,7 @@ copy_if_missing "$SOURCE_DIR/wiki/README.md" "$TARGET_DIR/wiki/README.md"
 copy_if_missing "$SOURCE_DIR/wiki/index.md" "$TARGET_DIR/wiki/index.md"
 copy_if_missing "$SOURCE_DIR/wiki/log.md" "$TARGET_DIR/wiki/log.md"
 copy_if_missing "$SOURCE_DIR/wiki/system-overview.md" "$TARGET_DIR/wiki/system-overview.md"
+copy_if_missing "$SOURCE_DIR/wiki.config.json" "$TARGET_DIR/wiki.config.json"
 
 chmod +x "$TARGET_DIR/.claude/hooks/scripts/wiki_session_start.py"
 chmod +x "$TARGET_DIR/.claude/hooks/scripts/wiki_stop_hook.py"

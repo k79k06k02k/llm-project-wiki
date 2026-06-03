@@ -157,6 +157,44 @@ test "$(cd "$empty_target/wiki" && printf '%s' "{\"session_id\":\"$SESSION_PREFI
 
 echo "PASS: installed Claude and Codex session hooks run from a project subdirectory"
 
+# Write policy: install.sh ships wiki.config.json (require_human_approval: true).
+test -f "$empty_target/wiki.config.json"
+
+assert_index_contains() {
+  local name="$1"
+  local index_cmd="$2"
+  local use_project_dir="$3"
+  local needle="$4"
+  local result
+
+  if [ "$use_project_dir" = "claude" ]; then
+    result="$(cd "$empty_target/wiki" && CLAUDE_PROJECT_DIR="$empty_target" sh -c "$index_cmd" | python3 -c 'import json,sys; print(sys.argv[1] in json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"])' "$needle")"
+  else
+    result="$(cd "$empty_target/wiki" && sh -c "$index_cmd" | python3 -c 'import json,sys; print(sys.argv[1] in json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"])' "$needle")"
+  fi
+
+  if [ "$result" != "True" ]; then
+    echo "FAIL: $name expected injected policy to contain '$needle'"
+    exit 1
+  fi
+}
+
+# Installed default (require_human_approval: true) -> approval required.
+assert_index_contains "claude policy required (default)" "$claude_session_start_index_cmd" "claude" "human approval REQUIRED"
+assert_index_contains "codex policy required (default)" "$codex_session_start_index_cmd" "codex" "human approval REQUIRED"
+
+# Toggle off -> approval not required.
+printf '{\n  "require_human_approval": false\n}\n' >"$empty_target/wiki.config.json"
+assert_index_contains "claude policy not required" "$claude_session_start_index_cmd" "claude" "human approval NOT required"
+assert_index_contains "codex policy not required" "$codex_session_start_index_cmd" "codex" "human approval NOT required"
+
+# Missing config -> fail closed to approval required.
+rm -f "$empty_target/wiki.config.json"
+assert_index_contains "claude policy fail-closed" "$claude_session_start_index_cmd" "claude" "human approval REQUIRED"
+assert_index_contains "codex policy fail-closed" "$codex_session_start_index_cmd" "codex" "human approval REQUIRED"
+
+echo "PASS: wiki.config.json toggles the injected write policy (with fail-closed default)"
+
 git -C "$existing_target" init >/dev/null
 mkdir -p "$existing_target/.claude" "$existing_target/.codex" "$existing_target/wiki"
 cat >"$existing_target/.claude/settings.json" <<'JSON'

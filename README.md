@@ -42,11 +42,12 @@ The point is not to create another documentation folder. The point is to make pr
 │   └── smoke_test.sh
 ├── templates/
 │   └── wiki-page.md
-└── wiki/
-    ├── README.md
-    ├── index.md
-    ├── log.md
-    └── system-overview.md
+├── wiki/
+│   ├── README.md
+│   ├── index.md
+│   ├── log.md
+│   └── system-overview.md
+└── wiki.config.json
 ```
 
 ## Quick Start
@@ -89,9 +90,24 @@ Codex discovers repository skills from `.agents/skills`. The checked-in `.agents
 3. During work, the agent may propose a `Wiki suggestion` when it discovers durable knowledge.
 4. At the end of substantial work, the agent evaluates whether the session produced wiki-worthy knowledge.
 5. The agent proposes a `Wiki suggestion` when there is durable knowledge to record. In Codex, do not add no-op markers solely for the hook; keep the transcript clean.
-6. Human approval is required before any wiki file is created, updated, or deleted.
+6. Human approval is required before any wiki file is created, updated, or deleted (configurable, see below).
 
 This keeps the system boring and auditable. Boring is good here. Unreviewed AI memory is just a more confident way to store mistakes.
+
+## Write Policy Configuration
+
+The root `wiki.config.json` controls whether wiki writes need human approval:
+
+```json
+{
+  "require_human_approval": true
+}
+```
+
+- `true` (default): the agent proposes a `Wiki suggestion` and waits for explicit approval before writing.
+- `false`: the agent may create, update, or delete wiki pages directly, while still updating the index, appending to the log, and emitting a wiki evaluation marker.
+
+The `SessionStart` hook reads this file and injects the active policy into Claude Code and Codex context at the start of every session, so a change takes effect on the next session. The hook fails closed: a missing, unreadable, or invalid config is treated as `require_human_approval: true`.
 
 ## Wiki-Worthy Knowledge
 

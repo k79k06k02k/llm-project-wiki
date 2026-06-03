@@ -27,6 +27,31 @@ def project_root() -> Path:
     return Path.cwd()
 
 
+def require_human_approval(root: Path) -> bool:
+    """Read the wiki write policy. Fail closed: default to requiring approval."""
+    try:
+        config = json.loads((root / "wiki.config.json").read_text(encoding="utf-8"))
+        return bool(config.get("require_human_approval", True))
+    except Exception:
+        return True
+
+
+def write_policy_text(root: Path) -> str:
+    if require_human_approval(root):
+        return (
+            "Wiki write policy (wiki.config.json): human approval REQUIRED. "
+            'Propose updates with the "Wiki suggestion" format and wait for '
+            "explicit approval before creating, updating, or deleting any wiki page."
+        )
+    return (
+        "Wiki write policy (wiki.config.json): human approval NOT required. "
+        "When you find durable knowledge, you may write the wiki page directly "
+        "without waiting for approval — still update wiki/index.md, append to "
+        'wiki/log.md, and output a wiki evaluation marker (e.g. "Wiki suggestion") '
+        "so the Stop hook passes."
+    )
+
+
 def emit_context(text: str) -> None:
     print(
         json.dumps(
@@ -60,7 +85,11 @@ def main() -> None:
         if not index_path.is_file():
             print("{}")
             return
-        emit_context(f"Project wiki index:\n\n{index_path.read_text(encoding='utf-8')}")
+        emit_context(
+            "Project wiki index:\n\n"
+            f"{index_path.read_text(encoding='utf-8')}\n\n"
+            f"{write_policy_text(root)}"
+        )
         return
 
     if mode == "git-context":

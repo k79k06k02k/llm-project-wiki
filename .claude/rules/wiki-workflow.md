@@ -40,9 +40,21 @@ Codex-specific details:
 
 ## Write Policy
 
-All wiki writes require explicit human approval.
+The write policy is controlled by `require_human_approval` in the root
+`wiki.config.json`. The SessionStart hook reads this file and injects the
+active policy into context at the start of every session. The default is
+`true`, and the hook fails closed: if the config is missing, unreadable, or
+holds an invalid value, approval is required.
 
-When you find knowledge worth saving, propose it in the conversation:
+- **`require_human_approval: true`** (default): all wiki writes require
+  explicit human approval. When you find knowledge worth saving, propose it in
+  the conversation and wait for approval before writing.
+- **`require_human_approval: false`**: you may create, update, or delete wiki
+  pages directly without waiting for approval. Still update `wiki/index.md`,
+  append to `wiki/log.md`, and emit a wiki evaluation marker so the Stop hook
+  passes.
+
+When approval is required, propose updates in this format:
 
 ```text
 Wiki suggestion: I found that the checkout flow uses a two-stage loading pattern that is not documented.
@@ -51,7 +63,8 @@ Wiki suggestion: I found that the checkout flow uses a two-stage loading pattern
 - Approval? If approved, I will write the wiki update.
 ```
 
-Do not create, update, or delete wiki pages until the user approves.
+When approval is required, do not create, update, or delete wiki pages until
+the user approves.
 
 ## Stop Hook Markers
 
