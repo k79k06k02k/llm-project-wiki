@@ -28,13 +28,14 @@ def page(confidence="high", body="# Title\n\nSome body text.\n", title="X"):
     return front + body
 
 
-def run_gate(payload, root):
+def run_gate(payload, root, cwd=None, raw_stdin=None):
     proc = subprocess.run(
         [sys.executable, str(GATE)],
-        input=json.dumps(payload),
+        input=raw_stdin if raw_stdin is not None else json.dumps(payload),
         env={**os.environ, "CLAUDE_PROJECT_DIR": str(root)},
         capture_output=True,
         text=True,
+        cwd=cwd,
     )
     assert proc.returncode == 0, f"gate exited {proc.returncode}: {proc.stderr}"
     out = proc.stdout.strip()
@@ -207,6 +208,58 @@ class GateTestCase(unittest.TestCase):
         self.set_policy("banana")
         out = run_gate(self.Write("wiki/new.md", page("medium")), self.root)
         self.assertIsNone(decision(out))
+
+    # --- Robustness fixes from code review ---
+
+    # Bash bypasses that the narrow `wiki/...\.md` regex missed.
+    def test_bash_rm_rf_whole_dir_denies(self):
+        out = run_gate(self.Bash("rm -rf wiki"), self.root)
+        self.assertEqual(decision(out), "deny")
+
+    def test_bash_rm_glob_denies(self):
+        out = run_gate(self.Bash("rm wiki/*"), self.root)
+        self.assertEqual(decision(out), "deny")
+
+    def test_bash_mv_dir_denies(self):
+        out = run_gate(self.Bash("mv wiki/ /tmp/"), self.root)
+        self.assertEqual(decision(out), "deny")
+
+    # Must not false-positive on an unrelated path that merely contains "wiki".
+    def test_bash_unrelated_wiki_substring_inert(self):
+        out = run_gate(self.Bash("rm /tmp/wiki-notes.txt"), self.root)
+        self.assertIsNone(decision(out))
+
+    # Non-dict config root must not crash the gate (fail-closed -> inert).
+    def test_non_dict_config_inert(self):
+        (self.root / "wiki.config.json").write_text("[]", encoding="utf-8")
+        out = run_gate(self.Write("wiki/new.md", page("medium")), self.root)
+        self.assertIsNone(decision(out))
+
+    # Non-dict stdin payload must not crash the gate.
+    def test_non_dict_stdin_inert(self):
+        out = run_gate(None, self.root, raw_stdin="[]")
+        self.assertIsNone(decision(out))
+
+    # Relative file_path resolves against the project root, not the cwd.
+    def test_relative_path_resolves_against_root(self):
+        payload = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "wiki/new.md", "content": page("medium")},
+        }
+        out = run_gate(payload, self.root, cwd="/tmp")
+        self.assertEqual(decision(out), "deny")
+
+    # Non-string file_path must not crash (inert).
+    def test_non_string_file_path_inert(self):
+        payload = {"tool_name": "Write", "tool_input": {"file_path": 42, "content": "x"}}
+        out = run_gate(payload, self.root)
+        self.assertIsNone(decision(out))
+
+    # UTF-8 BOM prefix must not break frontmatter confidence parsing.
+    def test_bom_prefix_high_allows(self):
+        self.write_page("p.md", confidence="high")
+        out = run_gate(self.Write("wiki/p.md", "﻿" + page("high")), self.root)
+        self.assertEqual(decision(out), "allow")
 
 
 if __name__ == "__main__":

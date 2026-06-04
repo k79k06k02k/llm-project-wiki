@@ -49,21 +49,21 @@ def resolve_write_policy(root: Path) -> str:
     """Read the active write policy. Fail closed to require_approval."""
     try:
         config = json.loads((root / "wiki.config.json").read_text(encoding="utf-8"))
+        if isinstance(config, dict):
+            policy = config.get("write_policy")
+            if policy in VALID_POLICIES:
+                return policy
+            if "require_human_approval" in config:
+                return "require_approval" if config.get("require_human_approval") else "open"
     except Exception:
-        return "require_approval"
-
-    policy = config.get("write_policy")
-    if policy in VALID_POLICIES:
-        return policy
-
-    if "require_human_approval" in config:
-        return "require_approval" if config.get("require_human_approval") else "open"
+        pass
 
     return "require_approval"
 
 
 def parse_confidence(text: str) -> str | None:
     """Pull the frontmatter confidence value (lowercased) or None."""
+    text = text.lstrip("\ufeff")
     if not text.startswith("---"):
         return None
     end = text.find("\n---", 3)
@@ -127,11 +127,14 @@ def allow_with_message(message: str) -> None:
 
 
 def handle_bash(command: str, root: Path) -> None:
-    # Only concerned with destructive operations on a wiki page.
-    if not re.search(r"\bwiki/[^\s'\"]+\.md\b", command):
-        allow_silent()
-    if re.search(r"\b(rm|git\s+rm|mv)\b", command):
-        deny("刪除或移動既有 wiki 頁面")
+    # Deny any destructive op (rm/git rm/mv) that references the wiki directory,
+    # whether a specific page (wiki/p.md), a glob (wiki/*), or the dir itself
+    # (rm -rf wiki). `wiki` must be a path segment, so unrelated names like
+    # wiki-notes.txt do not match.
+    destructive = re.search(r"\b(rm|git\s+rm|mv)\b", command)
+    references_wiki = re.search(r"(?<![\w.-])wiki(?=/|['\"\s]|$)", command)
+    if destructive and references_wiki:
+        deny("刪除或移動 wiki 目錄或頁面")
     allow_silent()
 
 
@@ -183,10 +186,12 @@ def change_message(rel: Path, tool_name: str, tool_input: dict, target: Path) ->
 
 def handle_write_edit(tool_name: str, tool_input: dict, root: Path) -> None:
     file_path = tool_input.get("file_path")
-    if not file_path:
+    if not file_path or not isinstance(file_path, (str, Path)):
         allow_silent()
 
-    target = Path(file_path)
+    # Resolve relative paths against the project root, not the cwd (the hook may
+    # run from a subdirectory). An absolute file_path is unchanged by this join.
+    target = (root / Path(file_path)).resolve()
     rel = wiki_relative(target, root)
     if rel is None:
         allow_silent()  # not a wiki path -> gate is inert
@@ -215,6 +220,9 @@ def main() -> None:
     try:
         data = json.load(sys.stdin)
     except Exception:
+        sys.exit(0)
+
+    if not isinstance(data, dict):
         sys.exit(0)
 
     root = project_root()
