@@ -27,28 +27,58 @@ def project_root() -> Path:
     return Path.cwd()
 
 
-def require_human_approval(root: Path) -> bool:
-    """Read the wiki write policy. Fail closed: default to requiring approval."""
+VALID_POLICIES = {"require_approval", "auto", "open"}
+
+
+def resolve_write_policy(root: Path) -> str:
+    """Resolve the active write policy. Fail closed: default to require_approval.
+
+    Resolution order:
+      1. A valid `write_policy` enum value.
+      2. Legacy `require_human_approval` boolean (true -> require_approval,
+         false -> open).
+      3. require_approval (fail-closed: missing/unreadable/invalid config).
+    """
     try:
         config = json.loads((root / "wiki.config.json").read_text(encoding="utf-8"))
-        return bool(config.get("require_human_approval", True))
     except Exception:
-        return True
+        return "require_approval"
+
+    policy = config.get("write_policy")
+    if policy in VALID_POLICIES:
+        return policy
+
+    if "require_human_approval" in config:
+        return "require_approval" if config.get("require_human_approval") else "open"
+
+    return "require_approval"
 
 
-def write_policy_text(root: Path) -> str:
-    if require_human_approval(root):
+def write_policy_text(policy: str) -> str:
+    if policy == "open":
         return (
-            "Wiki write policy (wiki.config.json): human approval REQUIRED. "
-            'Propose updates with the "Wiki suggestion" format and wait for '
-            "explicit approval before creating, updating, or deleting any wiki page."
+            "Wiki write policy (wiki.config.json): human approval NOT required "
+            "(open). When you find durable knowledge, you may write the wiki page "
+            "directly without waiting for approval — still update wiki/index.md, "
+            'append to wiki/log.md, and output a wiki evaluation marker (e.g. "Wiki '
+            'suggestion") so the Stop hook passes.'
+        )
+    if policy == "auto":
+        return (
+            "Wiki write policy (wiki.config.json): auto. You may write a wiki page "
+            "directly only when its resulting frontmatter confidence is `high`. A "
+            "PreToolUse gate enforces this deterministically: writes whose "
+            "resulting confidence is `medium`, `low`, or missing — plus deletes and "
+            "writes to the wrong location inside wiki/ — are blocked and must be "
+            'proposed with the "Wiki suggestion" format instead. High-confidence '
+            "writes are allowed, but the gate surfaces their diff to the human, so "
+            "set confidence honestly. Still update wiki/index.md, append to "
+            "wiki/log.md, and output a wiki evaluation marker so the Stop hook passes."
         )
     return (
-        "Wiki write policy (wiki.config.json): human approval NOT required. "
-        "When you find durable knowledge, you may write the wiki page directly "
-        "without waiting for approval — still update wiki/index.md, append to "
-        'wiki/log.md, and output a wiki evaluation marker (e.g. "Wiki suggestion") '
-        "so the Stop hook passes."
+        "Wiki write policy (wiki.config.json): human approval REQUIRED. "
+        'Propose updates with the "Wiki suggestion" format and wait for '
+        "explicit approval before creating, updating, or deleting any wiki page."
     )
 
 
@@ -88,7 +118,7 @@ def main() -> None:
         emit_context(
             "Project wiki index:\n\n"
             f"{index_path.read_text(encoding='utf-8')}\n\n"
-            f"{write_policy_text(root)}"
+            f"{write_policy_text(resolve_write_policy(root))}"
         )
         return
 
