@@ -49,6 +49,10 @@ class ResolveWritePolicyTestCase(unittest.TestCase):
         self.write_config({"write_policy": "banana"})
         self.assertEqual(mod.resolve_write_policy(self.root), "require_approval")
 
+    def test_non_dict_config_fails_closed(self):
+        (self.root / "wiki.config.json").write_text("[]", encoding="utf-8")
+        self.assertEqual(mod.resolve_write_policy(self.root), "require_approval")
+
 
 class WritePolicyTextTestCase(unittest.TestCase):
     def test_require_approval_text(self):

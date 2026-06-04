@@ -41,15 +41,14 @@ def resolve_write_policy(root: Path) -> str:
     """
     try:
         config = json.loads((root / "wiki.config.json").read_text(encoding="utf-8"))
+        if isinstance(config, dict):
+            policy = config.get("write_policy")
+            if policy in VALID_POLICIES:
+                return policy
+            if "require_human_approval" in config:
+                return "require_approval" if config.get("require_human_approval") else "open"
     except Exception:
-        return "require_approval"
-
-    policy = config.get("write_policy")
-    if policy in VALID_POLICIES:
-        return policy
-
-    if "require_human_approval" in config:
-        return "require_approval" if config.get("require_human_approval") else "open"
+        pass
 
     return "require_approval"
 
