@@ -127,6 +127,7 @@ merge_hook_json "$SOURCE_DIR/.claude/settings.json" "$TARGET_DIR/.claude/setting
 copy_if_missing "$SOURCE_DIR/.claude/rules/wiki-workflow.md" "$TARGET_DIR/.claude/rules/wiki-workflow.md"
 copy_if_missing "$SOURCE_DIR/.claude/hooks/scripts/wiki_session_start.py" "$TARGET_DIR/.claude/hooks/scripts/wiki_session_start.py"
 copy_if_missing "$SOURCE_DIR/.claude/hooks/scripts/wiki_stop_hook.py" "$TARGET_DIR/.claude/hooks/scripts/wiki_stop_hook.py"
+copy_if_missing "$SOURCE_DIR/.claude/hooks/scripts/wiki_write_gate.py" "$TARGET_DIR/.claude/hooks/scripts/wiki_write_gate.py"
 copy_if_missing "$SOURCE_DIR/.claude/skills/wiki-review/SKILL.md" "$TARGET_DIR/.claude/skills/wiki-review/SKILL.md"
 copy_if_missing "$SOURCE_DIR/.agents/skills/wiki-review/SKILL.md" "$TARGET_DIR/.agents/skills/wiki-review/SKILL.md"
 copy_if_missing "$SOURCE_DIR/.agents/skills/wiki-review/agents/openai.yaml" "$TARGET_DIR/.agents/skills/wiki-review/agents/openai.yaml"
@@ -141,6 +142,7 @@ copy_if_missing "$SOURCE_DIR/wiki.config.json" "$TARGET_DIR/wiki.config.json"
 
 chmod +x "$TARGET_DIR/.claude/hooks/scripts/wiki_session_start.py"
 chmod +x "$TARGET_DIR/.claude/hooks/scripts/wiki_stop_hook.py"
+chmod +x "$TARGET_DIR/.claude/hooks/scripts/wiki_write_gate.py"
 chmod +x "$TARGET_DIR/.codex/hooks/scripts/wiki_session_start.py"
 chmod +x "$TARGET_DIR/.codex/hooks/scripts/wiki_stop_hook.py"
 
