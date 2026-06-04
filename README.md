@@ -96,18 +96,21 @@ This keeps the system boring and auditable. Boring is good here. Unreviewed AI m
 
 ## Write Policy Configuration
 
-The root `wiki.config.json` controls whether wiki writes need human approval:
+The root `wiki.config.json` controls how wiki writes are gated via a single `write_policy` value:
 
 ```json
 {
-  "require_human_approval": true
+  "write_policy": "require_approval"
 }
 ```
 
-- `true` (default): the agent proposes a `Wiki suggestion` and waits for explicit approval before writing.
-- `false`: the agent may create, update, or delete wiki pages directly, while still updating the index, appending to the log, and emitting a wiki evaluation marker.
+- `require_approval` (default): the agent proposes a `Wiki suggestion` and waits for explicit approval before writing.
+- `auto`: a deterministic `PreToolUse` gate (`wiki_write_gate.py`) decides per write. It judges each write by the resulting frontmatter `confidence`: `high` is allowed (and its diff is surfaced to you), while `medium` / `low` / missing confidence, deletes, and writes to the wrong location inside `wiki/` are blocked and must be proposed. This gate is Claude-only; Codex applies the same rules by instruction.
+- `open`: the agent may create, update, or delete wiki pages directly, while still updating the index, appending to the log, and emitting a wiki evaluation marker.
 
-The `SessionStart` hook reads this file and injects the active policy into Claude Code and Codex context at the start of every session, so a change takes effect on the next session. The hook fails closed: a missing, unreadable, or invalid config is treated as `require_human_approval: true`.
+**Migration**: the legacy boolean `require_human_approval` is still honored — `true` maps to `require_approval`, `false` maps to `open`. A valid `write_policy` value takes precedence.
+
+The `SessionStart` hook reads this file and injects the active policy into Claude Code and Codex context at the start of every session, so a change takes effect on the next session. Resolution fails closed: a missing, unreadable, or invalid config is treated as `require_approval`.
 
 ## Wiki-Worthy Knowledge
 

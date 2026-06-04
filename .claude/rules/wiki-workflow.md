@@ -40,21 +40,46 @@ Codex-specific details:
 
 ## Write Policy
 
-The write policy is controlled by `require_human_approval` in the root
+The write policy is controlled by `write_policy` in the root
 `wiki.config.json`. The SessionStart hook reads this file and injects the
 active policy into context at the start of every session. The default is
-`true`, and the hook fails closed: if the config is missing, unreadable, or
-holds an invalid value, approval is required.
+`require_approval`, and resolution fails closed: if the config is missing,
+unreadable, or holds an invalid value, approval is required.
 
-- **`require_human_approval: true`** (default): all wiki writes require
-  explicit human approval. When you find knowledge worth saving, propose it in
-  the conversation and wait for approval before writing.
-- **`require_human_approval: false`**: you may create, update, or delete wiki
-  pages directly without waiting for approval. Still update `wiki/index.md`,
-  append to `wiki/log.md`, and emit a wiki evaluation marker so the Stop hook
-  passes.
+`write_policy` takes one of three values:
 
-When approval is required, propose updates in this format:
+- **`require_approval`** (default): all wiki writes require explicit human
+  approval. When you find knowledge worth saving, propose it in the conversation
+  and wait for approval before writing.
+- **`auto`**: a PreToolUse gate (`wiki_write_gate.py`) decides per write,
+  deterministically. See "Auto Mode Gate" below.
+- **`open`**: you may create, update, or delete wiki pages directly without
+  waiting for approval. Still update `wiki/index.md`, append to `wiki/log.md`,
+  and emit a wiki evaluation marker so the Stop hook passes.
+
+**Migration**: the legacy boolean `require_human_approval` is still honored —
+`true` maps to `require_approval`, `false` maps to `open`. A valid `write_policy`
+value takes precedence over the legacy key.
+
+### Auto Mode Gate
+
+Under `auto`, the `PreToolUse` hook governs the `wiki/` tree only (writes
+elsewhere are untouched) and judges each write by the **resulting** frontmatter
+`confidence` the agent assigns it:
+
+- Resulting `confidence: high` → allowed; the gate surfaces the diff to the human.
+- Resulting `confidence: medium` / `low` / missing → blocked; propose instead.
+- Deleting a page (`rm` / `git rm` / `mv` out of `wiki/`) → blocked.
+- Writing to the wrong location inside `wiki/` (nested folder, non-`.md`) → blocked.
+- `wiki/index.md` and `wiki/log.md` maintenance → allowed (they carry no
+  `confidence`).
+
+Because the gate keys on the confidence you write, **set `confidence` honestly**.
+The diff surfacing is the backstop: a high-confidence write is allowed but never
+silent. This gate is Claude-specific; the Codex layer does not enforce it.
+
+When approval is required (or the gate blocks a write), propose updates in this
+format:
 
 ```text
 Wiki suggestion: I found that the checkout flow uses a two-stage loading pattern that is not documented.
