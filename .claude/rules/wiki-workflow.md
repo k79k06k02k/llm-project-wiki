@@ -38,6 +38,33 @@ Codex-specific details:
 - Bug roots and fixes that future developers or QA may hit again.
 - Project conventions that are not already obvious from style rules.
 
+## What Not To Record
+
+**If the code can tell you, don't write it down.** The wiki's value is in what
+the code can't say, not in restating what the code does — a restatement only
+drifts from the code over time and becomes a lying doc that nobody maintains.
+
+- **Mechanics you get from reading a single file** (what a method does, that a
+  field exists, the steps of a flow) → don't write it; the code is the only
+  source of truth.
+- **Structure you can derive straight from the code** (class relationships, call
+  chains, prefab hierarchies) → don't write it; the repo already records it.
+- **Anything `git log` can answer** (when it changed, who changed it, what
+  changed) → don't write it; use `git log`.
+
+**The test**: ask "could I find this by reading the code?" If yes → don't write
+it. Only write what the code *can't* reveal: **why** it was designed this way,
+**fail-silent couplings** that span multiple files with no compile-time signal
+and can only be reconstructed by piecing them together, and traps others will
+**step on repeatedly**.
+
+Even when a piece of knowledge spans several files, if condensing it into "one
+sentence plus a few filename pointers" is enough — and the details are more
+accurate read from the code — then **write that one pointer** (or a single
+gotcha), don't copy the code's content into a full page. Prefer "few but
+precise": one genuinely-uncoverable gotcha beats a page of explanation the code
+could have given you.
+
 ## Write Policy
 
 The write policy is controlled by `write_policy` in the root
