@@ -2,8 +2,7 @@
 
 The gate is a pure stdin->stdout JSON program. Each test feeds a PreToolUse
 payload on stdin (with CLAUDE_PROJECT_DIR pointing at a temp repo) and asserts
-the resulting decision. Test numbers map to the Testing section of
-docs/superpowers/specs/2026-06-04-wiki-auto-write-policy-design.md.
+the resulting decision.
 """
 
 import json

@@ -30,9 +30,7 @@ The point is not to create another documentation folder. The point is to make pr
 │   ├── settings.json
 │   └── skills/wiki-review/SKILL.md
 ├── .codex/
-│   ├── hooks.json
-│   ├── hooks/scripts/wiki_session_start.py
-│   └── hooks/scripts/wiki_stop_hook.py
+│   └── hooks.json
 ├── .agents/
 │   └── skills/wiki-review/
 │       ├── SKILL.md
@@ -40,8 +38,6 @@ The point is not to create another documentation folder. The point is to make pr
 ├── scripts/
 │   ├── install.sh
 │   └── smoke_test.sh
-├── templates/
-│   └── wiki-page.md
 ├── wiki/
 │   ├── README.md
 │   ├── index.md
@@ -70,7 +66,7 @@ Please integrate LLM Project Wiki into the current project: https://github.com/k
 Run `scripts/install.sh` from that repository.
 ```
 
-Then open the target project with Claude Code or Codex. On session start, the agent should receive the wiki index as additional context. Claude Code uses a blocking stop hook for substantial responses; Codex keeps the stop hook non-blocking and relies on injected instructions so the transcript is not polluted by hook feedback.
+Then open the target project with Claude Code or Codex. On session start, the agent should receive the wiki index as additional context. Claude Code uses a blocking stop hook for substantial responses; Codex registers no stop hook and relies on injected instructions so the transcript is not polluted by hook feedback. Both tools share one `wiki_session_start.py` script (under `.claude/hooks/scripts/`); the Codex hooks call it with a `codex` flavor argument.
 
 The installer is designed for existing projects:
 
@@ -122,7 +118,28 @@ Capture knowledge that saves future investigation:
 - Bug roots and fixes other developers or QA may hit again.
 - Project conventions not obvious from the style guide.
 
-Do not record everything. Small one-file fixes usually do not need a wiki page.
+## What Not To Record
+
+**If the code can tell you, don't write it down.** The wiki's value is in what
+the code can't say, not in restating what the code does — a restatement only
+drifts from the code over time and becomes a lying doc nobody maintains.
+
+- Mechanics you get from reading a single file (what a method does, that a
+  field exists, the steps of a flow). The code is the only source of truth.
+- Structure you can derive straight from the code (class relationships, call
+  chains, prefab hierarchies). The repo already records it.
+- Anything `git log` can answer (when it changed, who changed it, what changed).
+
+The test: ask "could I find this by reading the code?" If yes, don't write it.
+Only write what the code can't reveal: **why** it was designed this way,
+fail-silent couplings that span multiple files with no compile-time signal, and
+traps others will step on repeatedly.
+
+Even when a piece of knowledge spans several files, if one sentence plus a few
+filename pointers is enough — and the details are more accurate read from the
+code — write that one pointer (or a single gotcha), not a full page. Prefer few
+but precise: one genuinely-uncoverable gotcha beats a page of explanation the
+code could have given you.
 
 ## Hook Markers
 
@@ -131,7 +148,7 @@ The Claude Code stop hook looks for either marker in the final assistant respons
 - `Wiki suggestion`
 - `No wiki updates needed`
 
-Codex does not block on missing markers. Codex renders stop-hook blocks as visible Hook feedback and can create marker-only follow-up messages, so the Codex stop hook is intentionally non-blocking.
+Codex does not block on missing markers. Codex renders stop-hook blocks as visible Hook feedback and can create marker-only follow-up messages, so Codex intentionally registers no stop hook and relies on the SessionStart instructions instead.
 
 ## Smoke Test
 
@@ -143,11 +160,10 @@ Run:
 
 The smoke test verifies that:
 
-- Stop hooks allow short responses.
-- Claude Code stop hook blocks substantial responses without a wiki marker.
-- Codex stop hook allows substantial responses without emitting Hook feedback.
-- Stop hooks allow responses containing `Wiki suggestion`.
-- Stop hooks allow responses containing `No wiki updates needed`.
+- The Claude Code stop hook allows short responses.
+- The Claude Code stop hook blocks substantial responses without a wiki marker.
+- The Claude Code stop hook allows responses containing `Wiki suggestion`.
+- The Claude Code stop hook allows responses containing `No wiki updates needed`.
 - The installer creates Claude Code hooks, Codex hooks, and repo-scoped Codex skill files in a fresh target.
 - Installed session hooks can load wiki and git context from a project subdirectory.
 - Existing Claude Code and Codex hook configs are merged instead of overwritten.

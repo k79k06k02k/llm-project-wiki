@@ -18,10 +18,11 @@ The project keeps a shared, git-tracked wiki in `wiki/`. The AI agent may propos
 ## Codex Support
 
 Codex can run the same wiki flow through `.codex/hooks.json`.
-The Codex implementation uses `SessionStart` to load `wiki/index.md` and git context,
-then leaves `Stop` non-blocking. Codex Stop hook blocks are rendered as visible
-Hook feedback and can create marker-only follow-up messages, so wiki self-review
-is handled through instructions instead of a Stop-time gate.
+The Codex hooks call the shared `.claude/hooks/scripts/wiki_session_start.py`
+(with a `codex` flavor argument) to load `wiki/index.md` and git context, and
+register no `Stop` hook. Codex renders Stop hook blocks as visible Hook
+feedback and can create marker-only follow-up messages, so wiki self-review is
+handled through instructions instead of a Stop-time gate.
 
 Codex-specific details:
 

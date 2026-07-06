@@ -14,6 +14,7 @@ the session produced durable knowledge worth proposing for the project wiki.
 import json
 import re
 import sys
+import tempfile
 
 
 WIKI_EVAL_PATTERN = re.compile(
@@ -26,7 +27,7 @@ MAX_BLOCKS_PER_TURN = 2
 
 
 def get_state_file(session_id: str) -> str:
-    return f"/tmp/wiki-stop-{session_id}.json"
+    return f"{tempfile.gettempdir()}/wiki-stop-{session_id}.json"
 
 
 def read_state(session_id: str) -> dict:

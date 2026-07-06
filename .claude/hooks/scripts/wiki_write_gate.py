@@ -3,8 +3,7 @@
 
 This hook is the deterministic enforcement layer for `write_policy: auto`. It
 only governs the `wiki/` tree and only acts when the policy is `auto`; in every
-other case it exits silently (allow). See
-docs/superpowers/specs/2026-06-04-wiki-auto-write-policy-design.md.
+other case it exits silently (allow).
 
 Classification (first match wins):
   1. Bash rm/git rm/mv of a wiki/*.md page          -> deny
@@ -17,48 +16,14 @@ Classification (first match wins):
 
 import difflib
 import json
-import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 
-VALID_POLICIES = {"require_approval", "auto", "open"}
+from wiki_session_start import project_root, resolve_write_policy
+
 CONFIDENCE_RE = re.compile(r"^confidence:\s*(\S+)\s*$", re.MULTILINE)
 MAINTENANCE = {"index.md", "log.md"}
-
-
-def project_root() -> Path:
-    env_root = os.environ.get("CLAUDE_PROJECT_DIR")
-    if env_root:
-        return Path(env_root)
-    try:
-        output = subprocess.check_output(
-            ["git", "rev-parse", "--show-toplevel"],
-            stderr=subprocess.DEVNULL,
-            text=True,
-        ).strip()
-        if output:
-            return Path(output)
-    except Exception:
-        pass
-    return Path.cwd()
-
-
-def resolve_write_policy(root: Path) -> str:
-    """Read the active write policy. Fail closed to require_approval."""
-    try:
-        config = json.loads((root / "wiki.config.json").read_text(encoding="utf-8"))
-        if isinstance(config, dict):
-            policy = config.get("write_policy")
-            if policy in VALID_POLICIES:
-                return policy
-            if "require_human_approval" in config:
-                return "require_approval" if config.get("require_human_approval") else "open"
-    except Exception:
-        pass
-
-    return "require_approval"
 
 
 def parse_confidence(text: str) -> str | None:

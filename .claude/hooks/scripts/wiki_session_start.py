@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Load project wiki context at session start."""
+"""Load project wiki context at session start.
+
+Shared by Claude Code and Codex: the second argv selects the flavor
+("claude" default, "codex"), which only changes the injected wording.
+"""
 
 import json
 import os
@@ -53,7 +57,7 @@ def resolve_write_policy(root: Path) -> str:
     return "require_approval"
 
 
-def write_policy_text(policy: str) -> str:
+def write_policy_text(policy: str, flavor: str = "claude") -> str:
     if policy == "open":
         return (
             "Wiki write policy (wiki.config.json): human approval NOT required "
@@ -63,6 +67,18 @@ def write_policy_text(policy: str) -> str:
             'suggestion") so the Stop hook passes.'
         )
     if policy == "auto":
+        if flavor == "codex":
+            return (
+                "Wiki write policy (wiki.config.json): auto. NOTE: the deterministic "
+                "PreToolUse gate is Claude-only; Codex does not enforce it, so apply "
+                "these rules by self-discipline. You may write a wiki page directly "
+                "only when its resulting frontmatter confidence is `high`, and you must "
+                "then disclose the diff. If the resulting confidence would be `medium`, "
+                "`low`, or missing — or for any delete or wrong-location write — do not "
+                'write; propose it with the "Wiki suggestion" format instead. Still '
+                "update wiki/index.md, append to wiki/log.md, and emit a wiki evaluation "
+                "marker."
+            )
         return (
             "Wiki write policy (wiki.config.json): auto. You may write a wiki page "
             "directly only when its resulting frontmatter confidence is `high`. A "
@@ -107,6 +123,7 @@ def git_output(root: Path, args: list[str]) -> str:
 
 def main() -> None:
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
+    flavor = sys.argv[2] if len(sys.argv) > 2 else "claude"
     root = project_root()
 
     if mode == "wiki-index":
@@ -114,10 +131,19 @@ def main() -> None:
         if not index_path.is_file():
             print("{}")
             return
+        codex_rule = (
+            "Codex wiki review rule: every substantial final response must "
+            "evaluate whether the conversation produced durable project "
+            "knowledge. If yes, include a visible `Wiki suggestion`. If no, "
+            "do not add a visible no-op marker; keep the transcript clean.\n\n"
+            if flavor == "codex"
+            else ""
+        )
         emit_context(
             "Project wiki index:\n\n"
             f"{index_path.read_text(encoding='utf-8')}\n\n"
-            f"{write_policy_text(resolve_write_policy(root))}"
+            f"{codex_rule}"
+            f"{write_policy_text(resolve_write_policy(root), flavor)}"
         )
         return
 
