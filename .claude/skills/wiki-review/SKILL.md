@@ -13,7 +13,11 @@ The core question:
 
 ## Step 1: Establish Scope
 
-Read `wiki/index.md` to see what pages already exist.
+Check what pages already exist before proposing anything new:
+
+1. Start from the category summary of `wiki/index.md` (already in context from session start if this is a live session, or read the file directly otherwise).
+2. Read the `wiki/index-<slug>.md` for any category the conversation plausibly touched, to see its full page list.
+3. If a topic doesn't map cleanly to a category, run `.claude/scripts/wiki-search.sh "<keyword>"` instead of guessing.
 
 Then review the conversation and identify:
 
@@ -42,6 +46,13 @@ Do not suggest updates for:
 - Changes already documented during the same task.
 - Low-confidence guesses.
 
+## Judgment Principles
+
+- **Few but precise.** One well-grounded, specific suggestion beats five vague ones.
+- **Don't force it.** If the conversation genuinely produced nothing wiki-worthy, say so plainly — do not pad the review to look productive.
+- **Check before proposing an update.** Confirm the target page is actually missing the information before suggesting a change to it, so you don't propose a duplicate.
+- **This review only proposes.** The actual write follows whatever `write_policy` is active in `wiki.config.json` — see "Step 4" below.
+
 ## Step 3: Produce The Review
 
 Use this format:
@@ -63,4 +74,10 @@ No wiki updates needed: [explain when there are no suggestions]
 Should I apply these suggestions?
 ```
 
-All writes require explicit user approval. This review proposes work; it does not perform the write.
+## Step 4: Writing Follows The Active Policy
+
+This review proposes work; it does not perform the write itself. What happens
+next depends on the `write_policy` in `wiki.config.json` (default:
+`require_approval`, meaning every write waits for explicit user approval). See
+`.claude/rules/wiki-workflow.md` for the full write policy, including what the
+`auto` and `open` policies allow the agent to do without waiting.

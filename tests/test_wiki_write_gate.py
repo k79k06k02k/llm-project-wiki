@@ -50,6 +50,13 @@ class GateTestCase(unittest.TestCase):
     def setUp(self):
         self.root = Path(tempfile.mkdtemp())
         (self.root / "wiki").mkdir()
+        # Top-level index lists the valid index-<slug> pages; this is the
+        # allowlist source for the index-* maintenance exemption below.
+        (self.root / "wiki" / "index.md").write_text(
+            "# Wiki Index\n\n| Category | Pages | Directory | Keywords |\n|---|---|---|---|\n"
+            "| Architecture | 1 | [index-architecture.md](index-architecture.md) | architecture |\n",
+            encoding="utf-8",
+        )
         self.set_policy("auto")
 
     def tearDown(self):
@@ -100,7 +107,10 @@ class GateTestCase(unittest.TestCase):
         out = run_gate(self.Edit("wiki/index.md", "Some body text.", "New body."), self.root)
         self.assertIsNone(decision(out))
 
-    def test_log_write_allows(self):
+    # Legacy back-compat regression test: the gate still exempts a flat
+    # wiki/log.md even though the log has moved to a weekly wiki/log/ tree,
+    # so downstream projects installed before that migration keep working.
+    def test_legacy_log_md_write_still_allows(self):
         out = run_gate(self.Write("wiki/log.md", "# Log\n\n- entry\n"), self.root)
         self.assertIsNone(decision(out))
 
@@ -259,6 +269,106 @@ class GateTestCase(unittest.TestCase):
         self.write_page("p.md", confidence="high")
         out = run_gate(self.Write("wiki/p.md", "﻿" + page("high")), self.root)
         self.assertEqual(decision(out), "allow")
+
+    # --- Two-level index + weekly wiki/log/ tree ---
+
+    # index-<slug>.md is a second-level index; maintenance writes to it need
+    # no confidence frontmatter -> allow.
+    def test_index_slug_write_allows(self):
+        out = run_gate(
+            self.Write("wiki/index-architecture.md", "- [a](a.md) — desc\n"), self.root
+        )
+        self.assertIsNone(decision(out))
+
+    # README.md is the entry-point doc, no confidence frontmatter expected -> allow.
+    def test_readme_write_allows(self):
+        out = run_gate(self.Write("wiki/README.md", "# Wiki\n"), self.root)
+        self.assertIsNone(decision(out))
+
+    # Weekly log file wiki/log/<year>/<monday>.md -> allow (maintenance, no
+    # confidence check).
+    def test_weekly_log_write_allows(self):
+        out = run_gate(
+            self.Write("wiki/log/2026/2026-07-06.md", "# Log\n\n## entry\n"), self.root
+        )
+        self.assertIsNone(decision(out))
+
+    # The log tree's own index wiki/log/index.md -> allow.
+    def test_log_index_write_allows(self):
+        out = run_gate(self.Write("wiki/log/index.md", "# Log index\n"), self.root)
+        self.assertIsNone(decision(out))
+
+    # Non-.md file inside the log tree -> deny.
+    def test_log_non_md_denies(self):
+        out = run_gate(self.Write("wiki/log/2026/data.json", "{}"), self.root)
+        self.assertEqual(decision(out), "deny")
+
+    # A nested path outside the log tree is still denied (a deeper case beyond
+    # test_nested_path_denies above).
+    def test_deep_non_log_nested_denies(self):
+        out = run_gate(self.Write("wiki/notes/2026/x.md", page("high")), self.root)
+        self.assertEqual(decision(out), "deny")
+
+    # --- Adversarial regression: filename spoofing / shell redirects / case bypass ---
+
+    # The index-<slug>.md exemption only recognizes slugs actually listed in
+    # wiki/index.md's directory column; a spoofed index-<fake>.md with no
+    # frontmatter must still be denied.
+    def test_fake_index_slug_denies(self):
+        out = run_gate(
+            self.Write("wiki/index-totally-fake.md", "smuggled knowledge, no frontmatter\n"),
+            self.root,
+        )
+        self.assertEqual(decision(out), "deny")
+
+    # When wiki/index.md itself is missing, the index-* exemption fails closed
+    # (only the fixed names index.md/README.md/log.md stay exempt).
+    def test_index_slug_fails_closed_without_index(self):
+        (self.root / "wiki" / "index.md").unlink()
+        out = run_gate(
+            self.Write("wiki/index-architecture.md", "- [a](a.md) — desc\n"), self.root
+        )
+        self.assertEqual(decision(out), "deny")
+
+    # Shell redirect / tee into wiki -> deny (>, >>, tee, tee -a).
+    def test_bash_redirect_into_wiki_denies(self):
+        for cmd in (
+            "cat > wiki/sneaky.md",
+            "echo x >> wiki/sneaky.md",
+            "tee wiki/sneaky.md",
+            "sort input | tee -a wiki/sneaky.md",
+        ):
+            out = run_gate(self.Bash(cmd), self.root)
+            self.assertEqual(decision(out), "deny", f"cmd not denied: {cmd}")
+
+    # A redirect that reads out of wiki (target is outside wiki/) must not be
+    # falsely denied.
+    def test_bash_redirect_out_of_wiki_inert(self):
+        out = run_gate(self.Bash("cat wiki/p.md > /tmp/out.md"), self.root)
+        self.assertIsNone(decision(out))
+
+    # macOS APFS is case-insensitive: a WIKI/ path must be treated the same as
+    # wiki/ and must not bypass the confidence check.
+    def test_uppercase_wiki_write_denies(self):
+        out = run_gate(self.Write("WIKI/new.md", page("medium")), self.root)
+        self.assertEqual(decision(out), "deny")
+
+    def test_uppercase_wiki_bash_rm_denies(self):
+        out = run_gate(self.Bash("rm WIKI/p.md"), self.root)
+        self.assertEqual(decision(out), "deny")
+
+    # Shell quoting / backslash-escaping bypasses: the command is normalized
+    # (quotes and backslashes stripped) before matching.
+    def test_bash_quoted_wiki_segment_denies(self):
+        for cmd in (
+            'echo x > "wiki"/new.md',
+            "echo x > 'wiki'/new.md",
+            '"tee" wiki/new.md',
+            'rm -rf wi"ki"',
+            "rm -rf wi\\ki",
+        ):
+            out = run_gate(self.Bash(cmd), self.root)
+            self.assertEqual(decision(out), "deny", f"cmd not denied: {cmd}")
 
 
 if __name__ == "__main__":

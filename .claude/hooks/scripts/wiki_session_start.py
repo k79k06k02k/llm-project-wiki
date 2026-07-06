@@ -44,7 +44,7 @@ def resolve_write_policy(root: Path) -> str:
       3. require_approval (fail-closed: missing/unreadable/invalid config).
     """
     try:
-        config = json.loads((root / "wiki.config.json").read_text(encoding="utf-8"))
+        config = json.loads((root / "wiki.config.json").read_text(encoding="utf-8-sig"))
         if isinstance(config, dict):
             policy = config.get("write_policy")
             if policy in VALID_POLICIES:
@@ -62,9 +62,10 @@ def write_policy_text(policy: str, flavor: str = "claude") -> str:
         return (
             "Wiki write policy (wiki.config.json): human approval NOT required "
             "(open). When you find durable knowledge, you may write the wiki page "
-            "directly without waiting for approval — still update wiki/index.md, "
-            'append to wiki/log.md, and output a wiki evaluation marker (e.g. "Wiki '
-            'suggestion") so the Stop hook passes.'
+            "directly without waiting for approval — still maintain the two-level "
+            "index (wiki/index.md + wiki/index-<slug>.md), append to the current "
+            "week's log file under wiki/log/, and output a wiki evaluation marker "
+            '(e.g. "Wiki suggestion") so the Stop hook passes.'
         )
     if policy == "auto":
         if flavor == "codex":
@@ -76,8 +77,8 @@ def write_policy_text(policy: str, flavor: str = "claude") -> str:
                 "then disclose the diff. If the resulting confidence would be `medium`, "
                 "`low`, or missing — or for any delete or wrong-location write — do not "
                 'write; propose it with the "Wiki suggestion" format instead. Still '
-                "update wiki/index.md, append to wiki/log.md, and emit a wiki evaluation "
-                "marker."
+                "maintain the two-level index and append to the current week's log "
+                "file under wiki/log/, and emit a wiki evaluation marker."
             )
         return (
             "Wiki write policy (wiki.config.json): auto. You may write a wiki page "
@@ -87,8 +88,10 @@ def write_policy_text(policy: str, flavor: str = "claude") -> str:
             "writes to the wrong location inside wiki/ — are blocked and must be "
             'proposed with the "Wiki suggestion" format instead. High-confidence '
             "writes are allowed, but the gate surfaces their diff to the human, so "
-            "set confidence honestly. Still update wiki/index.md, append to "
-            "wiki/log.md, and output a wiki evaluation marker so the Stop hook passes."
+            "set confidence honestly. Still maintain the two-level index "
+            "(wiki/index.md + wiki/index-<slug>.md), append to the current week's "
+            "log file under wiki/log/, and output a wiki evaluation marker so the "
+            "Stop hook passes."
         )
     return (
         "Wiki write policy (wiki.config.json): human approval REQUIRED. "
@@ -139,11 +142,59 @@ def main() -> None:
             if flavor == "codex"
             else ""
         )
+        policy_text = write_policy_text(resolve_write_policy(root), flavor)
+
+        # Summarize the category table instead of injecting the full index:
+        # rows are (category, page count, sub-index link, keywords). The header
+        # is skipped structurally (everything up to the |---| separator row),
+        # so it works for any header language.
+        text = index_path.read_text(encoding="utf-8")
+        rows = []
+        seen_separator = False
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped.startswith("|"):
+                continue
+            if not seen_separator:
+                if set(stripped) <= {"|", "-", ":", " "}:
+                    seen_separator = True
+                continue
+            cells = [c.strip() for c in stripped.strip("|").split("|")]
+            if len(cells) < 3:
+                continue
+            cat, cnt, link = cells[0], cells[1], cells[2]
+            keywords = cells[3] if len(cells) >= 4 else ""
+            rows.append((cat, cnt, link, keywords))
+
+        if not rows:
+            # No category table (e.g. a legacy flat index): inject it verbatim.
+            emit_context(
+                f"Project wiki index:\n\n{text}\n\n{codex_rule}{policy_text}"
+            )
+            return
+
+        lines_out = []
+        for cat, cnt, link, keywords in rows:
+            head = f"- {cat} ({cnt} pages) → {link}"
+            lines_out.append(f"{head}\n  keywords: {keywords}" if keywords else head)
+        summary = "\n".join(lines_out)
+
         emit_context(
-            "Project wiki index:\n\n"
-            f"{index_path.read_text(encoding='utf-8')}\n\n"
-            f"{codex_rule}"
-            f"{write_policy_text(resolve_write_policy(root), flavor)}"
+            "Project wiki categories (top-level index; details lazy-load):\n\n"
+            f"{summary}\n\n"
+            "Lookup workflow:\n"
+            "1. Match the topic against the categories above. Category names are "
+            "descriptive labels and users often use aliases, so match against the "
+            "keywords column semantically; only fall back to step 3 when nothing "
+            "matches.\n"
+            "2. Read wiki/index-<slug>.md for that category's full page list.\n"
+            "3. Otherwise grep: rg \"<keyword>\" wiki/ -g '!index*.md' -g '!log'\n"
+            "4. Tag filter: .claude/scripts/wiki-search.sh -t <tag> (or: "
+            "rg \"^tags:.*<tag>\" wiki/ -g '!index*.md')\n"
+            "Do not Read the full wiki/index.md (this summary already covers it). "
+            "Do not read wiki/log/ by default; for change history, rg over "
+            "wiki/log/ or open a specific weekly file.\n\n"
+            f"{codex_rule}{policy_text}"
         )
         return
 

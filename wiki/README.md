@@ -16,11 +16,12 @@ Agent rules and hooks: .claude/
 
 ## Core Files
 
-- `index.md` - wiki table of contents.
-- `log.md` - append-only wiki change log.
+- `index.md` - top-level index: one row per category (page count, sub-index link, keywords).
+- `index-<slug>.md` - per-category sub-index listing that category's pages.
+- `log/` - wiki change log, split into weekly files (named after the week's Monday) grouped by year; `log/index.md` lists them.
 - `README.md` - explains how this wiki works.
 
-All other Markdown files are knowledge pages.
+All other Markdown files are knowledge pages, kept flat under `wiki/`.
 
 ## Rules
 

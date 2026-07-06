@@ -26,7 +26,9 @@ The point is not to create another documentation folder. The point is to make pr
 ├── .claude/
 │   ├── hooks/scripts/wiki_stop_hook.py
 │   ├── hooks/scripts/wiki_session_start.py
+│   ├── hooks/scripts/wiki_write_gate.py
 │   ├── rules/wiki-workflow.md
+│   ├── scripts/wiki-search.sh
 │   ├── settings.json
 │   └── skills/wiki-review/SKILL.md
 ├── .codex/
@@ -41,10 +43,20 @@ The point is not to create another documentation folder. The point is to make pr
 ├── wiki/
 │   ├── README.md
 │   ├── index.md
-│   ├── log.md
+│   ├── index-<slug>.md        # one per category, e.g. index-architecture.md
+│   ├── log/
+│   │   ├── index.md
+│   │   └── <year>/YYYY-MM-DD.md   # one file per week (named after that week's Monday)
 │   └── system-overview.md
 └── wiki.config.json
 ```
+
+The index is two-level: `wiki/index.md` lists categories only (page count,
+sub-index link, keywords), and each `wiki/index-<slug>.md` lists that
+category's pages. The change log is a weekly file tree under `wiki/log/`
+instead of a single growing file. `.claude/scripts/wiki-search.sh` provides a
+tag- and full-text search over the knowledge pages (excluding the index and
+log files) for both the agent and human maintainers.
 
 ## Quick Start
 

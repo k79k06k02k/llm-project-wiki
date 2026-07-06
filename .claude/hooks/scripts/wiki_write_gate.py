@@ -5,13 +5,18 @@ This hook is the deterministic enforcement layer for `write_policy: auto`. It
 only governs the `wiki/` tree and only acts when the policy is `auto`; in every
 other case it exits silently (allow).
 
+The index is two-level (index.md + index-<slug>.md) and the log is a weekly
+file tree (wiki/log/<year>/<monday>.md); maintenance exemptions and the
+flat-layout check account for both.
+
 Classification (first match wins):
-  1. Bash rm/git rm/mv of a wiki/*.md page          -> deny
-  2. Write/Edit to a non-flat or non-.md wiki path   -> deny
-  3. wiki/index.md or wiki/log.md maintenance        -> allow (no confidence)
-  4. resulting confidence == high                    -> allow + surface diff
-  5. resulting confidence == medium / low            -> deny
-  6. resulting confidence missing / unparseable      -> deny (fail-closed)
+  1. Bash rm/git rm/mv or shell redirect/tee into wiki -> deny
+  2. wiki/log/ tree maintenance (.md only)             -> allow (no confidence)
+  3. Write/Edit to a non-flat or non-.md wiki path     -> deny
+  4. index*.md / README.md / legacy log.md maintenance -> allow (no confidence)
+  5. resulting confidence == high                      -> allow + surface diff
+  6. resulting confidence == medium / low              -> deny
+  7. resulting confidence missing / unparseable        -> deny (fail-closed)
 """
 
 import difflib
@@ -20,10 +25,32 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wiki_session_start import project_root, resolve_write_policy
 
 CONFIDENCE_RE = re.compile(r"^confidence:\s*(\S+)\s*$", re.MULTILINE)
-MAINTENANCE = {"index.md", "log.md"}
+
+
+def is_maintenance(name: str, root: Path) -> bool:
+    """Top-level index/README files carry no confidence frontmatter.
+
+    `index-<slug>.md` is exempt only when the slug is actually listed in the
+    directory column of wiki/index.md — otherwise any knowledge page could
+    dodge the confidence check by taking an index- prefix (fail-closed: if
+    index.md is missing or unreadable, no index-* file is exempt).
+
+    `log.md` stays exempt for downstream projects installed before the log
+    moved to the weekly wiki/log/ tree.
+    """
+    if name in {"README.md", "index.md", "log.md"}:
+        return True
+    if not name.startswith("index-"):
+        return False
+    try:
+        index_text = (root / "wiki" / "index.md").read_text(encoding="utf-8")
+    except Exception:
+        return False
+    return name in re.findall(r"index-[a-z0-9-]+\.md", index_text)
 
 
 def parse_confidence(text: str) -> str | None:
@@ -49,7 +76,10 @@ def wiki_relative(path: Path, root: Path) -> Path | None:
     except Exception:
         return None
     parts = rel.parts
-    if not parts or parts[0] != "wiki":
+    # APFS is case-insensitive but case-preserving: resolve() does not
+    # normalize WIKI/ back to wiki/, so the comparison must ignore case or the
+    # whole gate can be bypassed with a case variant.
+    if not parts or parts[0].lower() != "wiki":
         return None
     return rel
 
@@ -92,14 +122,28 @@ def allow_with_message(message: str) -> None:
 
 
 def handle_bash(command: str, root: Path) -> None:
+    # Strip quotes and backslashes before matching, otherwise shell quoting or
+    # escaping like "wiki"/x.md, "tee", or wi\ki slips past the regexes below.
+    command = command.replace('"', "").replace("'", "").replace("\\", "")
     # Deny any destructive op (rm/git rm/mv) that references the wiki directory,
     # whether a specific page (wiki/p.md), a glob (wiki/*), or the dir itself
     # (rm -rf wiki). `wiki` must be a path segment, so unrelated names like
     # wiki-notes.txt do not match.
-    destructive = re.search(r"\b(rm|git\s+rm|mv)\b", command)
-    references_wiki = re.search(r"(?<![\w.-])wiki(?=/|['\"\s]|$)", command)
+    destructive = re.search(r"\b(rm|git\s+rm|mv)\b", command, re.IGNORECASE)
+    references_wiki = re.search(r"(?<![\w.-])wiki(?=/|['\"\s]|$)", command, re.IGNORECASE)
     if destructive and references_wiki:
         deny("刪除或移動 wiki 目錄或頁面")
+    # Shell redirects / tee into wiki (cat > wiki/x.md, tee -a wiki/x.md) would
+    # bypass the Write/Edit confidence check, so they are denied. [^|;&]* keeps
+    # the match inside one pipeline segment, so reads out of wiki like
+    # `cat wiki/a.md > /tmp/b` are not caught. Scope note: only >, >>, and tee
+    # are covered; other file-writing tricks (python -c, curl -o, ...) cannot
+    # be enumerated by regex — the limitation is documented in wiki-workflow.md.
+    writes_into_wiki = re.search(
+        r"(?:>{1,2}|\btee\b(?:\s+-a)?)[^|;&]*(?<![\w.-])wiki/", command, re.IGNORECASE
+    )
+    if writes_into_wiki:
+        deny("透過 shell 重導向或 tee 寫入 wiki")
     allow_silent()
 
 
@@ -161,12 +205,19 @@ def handle_write_edit(tool_name: str, tool_input: dict, root: Path) -> None:
     if rel is None:
         allow_silent()  # not a wiki path -> gate is inert
 
-    # Rule 2: must be a flat wiki/<name>.md
-    if len(rel.parts) != 2 or rel.suffix != ".md":
-        deny("寫到 wiki/ 樹裡不允許的位置（需扁平的 wiki/<name>.md）")
+    # Rule 2: the weekly log tree is maintenance (wiki/log/index.md,
+    # wiki/log/<year>/<monday>.md) — allowed without confidence, .md only.
+    if len(rel.parts) > 2 and rel.parts[1] == "log":
+        if rel.suffix != ".md":
+            deny("寫到 wiki/log/ 樹裡不允許的檔案類型（僅 .md）")
+        allow_silent()
 
-    # Rule 3: maintenance files carry no confidence
-    if rel.name in MAINTENANCE:
+    # Rule 3: knowledge pages must be flat wiki/<name>.md
+    if len(rel.parts) != 2 or rel.suffix != ".md":
+        deny("寫到 wiki/ 樹裡不允許的位置（需扁平的 wiki/<name>.md 或 wiki/log/ 週檔）")
+
+    # Rule 4: maintenance files carry no confidence
+    if is_maintenance(rel.name, root):
         allow_silent()
 
     content = resulting_content(tool_name, tool_input, target)
