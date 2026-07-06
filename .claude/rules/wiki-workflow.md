@@ -41,6 +41,19 @@ Codex-specific details:
 
 ## What Not To Record
 
+**Security red line (hard rule, overrides everything below).** Never write any
+secret value read from code, logs, environment variables, config files, or
+command output into the wiki — credentials/passwords, session tokens, API keys,
+private keys/certificates, internal URLs or IPs, personal data, DB connection
+strings, and the like. When you must refer to one, write only the file path or a
+placeholder; **never reproduce the actual value**. This is a different axis from
+"if the code can tell you, don't write it" below: the red line is a prohibition
+(never transcribe it into the wiki even if the code reveals it), whereas the rest
+of this section is a value judgment about what is worth recording. This mirrors
+the path & privacy rule in CLAUDE.md ("secrets never land"). Under the `auto`
+write policy the agent writes directly with no human in the loop, so this rule
+matters most there.
+
 **If the code can tell you, don't write it down.** The wiki's value is in what
 the code can't say, not in restating what the code does — a restatement only
 drifts from the code over time and becomes a lying doc that nobody maintains.
