@@ -101,18 +101,18 @@ class GateTestCase(unittest.TestCase):
         out = run_gate(self.Write("wiki/new.md", page("low")), self.root)
         self.assertEqual(decision(out), "deny")
 
-    # 3. log.md append / index.md edit -> allow (rule 3)
+    # 3. index.md edit -> allow (rule 3, maintenance file, no confidence)
     def test_index_edit_allows(self):
         self.write_page("index.md", confidence=None)
         out = run_gate(self.Edit("wiki/index.md", "Some body text.", "New body."), self.root)
         self.assertIsNone(decision(out))
 
-    # Legacy back-compat regression test: the gate still exempts a flat
-    # wiki/log.md even though the log has moved to a weekly wiki/log/ tree,
-    # so downstream projects installed before that migration keep working.
-    def test_legacy_log_md_write_still_allows(self):
+    # The wiki no longer has a change log, so wiki/log.md is not a special
+    # maintenance file — it is treated as a knowledge page and must carry
+    # confidence like any other. A no-frontmatter log.md is therefore denied.
+    def test_flat_log_md_requires_confidence(self):
         out = run_gate(self.Write("wiki/log.md", "# Log\n\n- entry\n"), self.root)
-        self.assertIsNone(decision(out))
+        self.assertEqual(decision(out), "deny")
 
     # 4. Write rewrite, resulting high -> allow + diff
     def test_rewrite_high_allows_with_diff(self):
@@ -270,7 +270,7 @@ class GateTestCase(unittest.TestCase):
         out = run_gate(self.Write("wiki/p.md", "﻿" + page("high")), self.root)
         self.assertEqual(decision(out), "allow")
 
-    # --- Two-level index + weekly wiki/log/ tree ---
+    # --- Two-level index (flat wiki, no log tree) ---
 
     # index-<slug>.md is a second-level index; maintenance writes to it need
     # no confidence frontmatter -> allow.
@@ -285,27 +285,15 @@ class GateTestCase(unittest.TestCase):
         out = run_gate(self.Write("wiki/README.md", "# Wiki\n"), self.root)
         self.assertIsNone(decision(out))
 
-    # Weekly log file wiki/log/<year>/<monday>.md -> allow (maintenance, no
-    # confidence check).
-    def test_weekly_log_write_allows(self):
+    # The wiki is flat: any nested path inside wiki/ is denied. A former
+    # wiki/log/ path is nothing special now and gets the generic nested deny.
+    def test_nested_log_path_denies(self):
         out = run_gate(
             self.Write("wiki/log/2026/2026-07-06.md", "# Log\n\n## entry\n"), self.root
         )
-        self.assertIsNone(decision(out))
-
-    # The log tree's own index wiki/log/index.md -> allow.
-    def test_log_index_write_allows(self):
-        out = run_gate(self.Write("wiki/log/index.md", "# Log index\n"), self.root)
-        self.assertIsNone(decision(out))
-
-    # Non-.md file inside the log tree -> deny.
-    def test_log_non_md_denies(self):
-        out = run_gate(self.Write("wiki/log/2026/data.json", "{}"), self.root)
         self.assertEqual(decision(out), "deny")
 
-    # A nested path outside the log tree is still denied (a deeper case beyond
-    # test_nested_path_denies above).
-    def test_deep_non_log_nested_denies(self):
+    def test_deep_nested_denies(self):
         out = run_gate(self.Write("wiki/notes/2026/x.md", page("high")), self.root)
         self.assertEqual(decision(out), "deny")
 
@@ -322,7 +310,7 @@ class GateTestCase(unittest.TestCase):
         self.assertEqual(decision(out), "deny")
 
     # When wiki/index.md itself is missing, the index-* exemption fails closed
-    # (only the fixed names index.md/README.md/log.md stay exempt).
+    # (only the fixed names index.md/README.md stay exempt).
     def test_index_slug_fails_closed_without_index(self):
         (self.root / "wiki" / "index.md").unlink()
         out = run_gate(
@@ -345,6 +333,24 @@ class GateTestCase(unittest.TestCase):
     # falsely denied.
     def test_bash_redirect_out_of_wiki_inert(self):
         out = run_gate(self.Bash("cat wiki/p.md > /tmp/out.md"), self.root)
+        self.assertIsNone(decision(out))
+
+    # Backslash line-continuations are joined before matching, so a single
+    # command split across lines with `\` is still caught.
+    def test_bash_backslash_continuation_redirect_denies(self):
+        out = run_gate(self.Bash("cat foo >\\\nwiki/sneaky.md"), self.root)
+        self.assertEqual(decision(out), "deny")
+
+    def test_bash_backslash_continuation_rm_denies(self):
+        out = run_gate(self.Bash("rm -rf \\\nwiki"), self.root)
+        self.assertEqual(decision(out), "deny")
+
+    # A `>` on one line and a `wiki/` on a *separate* line (no continuation) are
+    # not the same redirect — e.g. a `git commit -F` heredoc message — so the
+    # redirect check must not false-deny across the newline.
+    def test_bash_redirect_and_wiki_on_separate_lines_inert(self):
+        cmd = "git commit -F - <<'EOF'\nfix: pipe output > result\nupdate wiki/x notes\nEOF"
+        out = run_gate(self.Bash(cmd), self.root)
         self.assertIsNone(decision(out))
 
     # macOS APFS is case-insensitive: a WIKI/ path must be treated the same as

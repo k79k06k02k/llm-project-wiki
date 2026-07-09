@@ -18,10 +18,10 @@ Agent rules and hooks: .claude/
 
 - `index.md` - top-level index: one row per category (page count, sub-index link, keywords).
 - `index-<slug>.md` - per-category sub-index listing that category's pages.
-- `log/` - wiki change log, split into weekly files (named after the week's Monday) grouped by year; `log/index.md` lists them.
 - `README.md` - explains how this wiki works.
 
-All other Markdown files are knowledge pages, kept flat under `wiki/`.
+All other Markdown files are knowledge pages, kept flat under `wiki/`. There is
+no tracked change log — read a page's history from git (`git log wiki/<page>.md`).
 
 ## Rules
 

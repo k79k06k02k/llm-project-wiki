@@ -81,14 +81,14 @@ class WritePolicyTextTestCase(unittest.TestCase):
         self.assertIn("auto", text.lower())
         self.assertIn("confidence", text.lower())
 
-    # The log moved from a single wiki/log.md to a weekly wiki/log/ tree; the
-    # open/auto policy text must point at the weekly file, not the old path.
-    def test_policy_text_references_weekly_log_not_log_md(self):
+    # The wiki no longer tracks a change log (history comes from git), so the
+    # open/auto policy text must not tell the agent to write any log file.
+    def test_policy_text_has_no_log_file_instruction(self):
         for policy in ("open", "auto"):
             for flavor in ("claude", "codex"):
                 text = mod.write_policy_text(policy, flavor)
-                self.assertNotIn("wiki/log.md", text)
-                self.assertIn("current week's log file under wiki/log/", text)
+                self.assertNotIn("wiki/log", text)
+                self.assertNotIn("log file under", text)
 
 
 class MainFlavorTestCase(unittest.TestCase):

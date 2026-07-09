@@ -44,19 +44,16 @@ The point is not to create another documentation folder. The point is to make pr
 │   ├── README.md
 │   ├── index.md
 │   ├── index-<slug>.md        # one per category, e.g. index-architecture.md
-│   ├── log/
-│   │   ├── index.md
-│   │   └── <year>/YYYY-MM-DD.md   # one file per week (named after that week's Monday)
 │   └── system-overview.md
 └── wiki.config.json
 ```
 
 The index is two-level: `wiki/index.md` lists categories only (page count,
 sub-index link, keywords), and each `wiki/index-<slug>.md` lists that
-category's pages. The change log is a weekly file tree under `wiki/log/`
-instead of a single growing file. `.claude/scripts/wiki-search.sh` provides a
-tag- and full-text search over the knowledge pages (excluding the index and
-log files) for both the agent and human maintainers.
+category's pages. The wiki keeps no tracked change log — a page's history is
+read from git (`git log wiki/<page>.md`). `.claude/scripts/wiki-search.sh`
+provides a tag- and full-text search over the knowledge pages (excluding the
+index files) for both the agent and human maintainers.
 
 ## Quick Start
 
@@ -114,7 +111,7 @@ The root `wiki.config.json` controls how wiki writes are gated via a single `wri
 
 - `require_approval` (default): the agent proposes a `Wiki suggestion` and waits for explicit approval before writing.
 - `auto`: a deterministic `PreToolUse` gate (`wiki_write_gate.py`) decides per write. It judges each write by the resulting frontmatter `confidence`: `high` is allowed (and its diff is surfaced to you), while `medium` / `low` / missing confidence, deletes, and writes to the wrong location inside `wiki/` are blocked and must be proposed. This gate is Claude-only; Codex applies the same rules by instruction.
-- `open`: the agent may create, update, or delete wiki pages directly, while still updating the index, appending to the log, and emitting a wiki evaluation marker.
+- `open`: the agent may create, update, or delete wiki pages directly, while still updating the index and emitting a wiki evaluation marker.
 
 **Migration**: the legacy boolean `require_human_approval` is still honored — `true` maps to `require_approval`, `false` maps to `open`. A valid `write_policy` value takes precedence.
 

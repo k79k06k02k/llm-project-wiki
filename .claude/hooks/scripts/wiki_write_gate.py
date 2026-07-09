@@ -5,18 +5,17 @@ This hook is the deterministic enforcement layer for `write_policy: auto`. It
 only governs the `wiki/` tree and only acts when the policy is `auto`; in every
 other case it exits silently (allow).
 
-The index is two-level (index.md + index-<slug>.md) and the log is a weekly
-file tree (wiki/log/<year>/<monday>.md); maintenance exemptions and the
-flat-layout check account for both.
+The index is two-level (index.md + index-<slug>.md) and the wiki is otherwise
+flat: change history lives in git (`git log wiki/<page>.md`), not in a tracked
+log file, so the gate only knows about knowledge pages and the index.
 
 Classification (first match wins):
   1. Bash rm/git rm/mv or shell redirect/tee into wiki -> deny
-  2. wiki/log/ tree maintenance (.md only)             -> allow (no confidence)
-  3. Write/Edit to a non-flat or non-.md wiki path     -> deny
-  4. index*.md / README.md / legacy log.md maintenance -> allow (no confidence)
-  5. resulting confidence == high                      -> allow + surface diff
-  6. resulting confidence == medium / low              -> deny
-  7. resulting confidence missing / unparseable        -> deny (fail-closed)
+  2. Write/Edit to a non-flat or non-.md wiki path     -> deny
+  3. index*.md / README.md maintenance                 -> allow (no confidence)
+  4. resulting confidence == high                      -> allow + surface diff
+  5. resulting confidence == medium / low              -> deny
+  6. resulting confidence missing / unparseable        -> deny (fail-closed)
 """
 
 import difflib
@@ -38,11 +37,8 @@ def is_maintenance(name: str, root: Path) -> bool:
     directory column of wiki/index.md — otherwise any knowledge page could
     dodge the confidence check by taking an index- prefix (fail-closed: if
     index.md is missing or unreadable, no index-* file is exempt).
-
-    `log.md` stays exempt for downstream projects installed before the log
-    moved to the weekly wiki/log/ tree.
     """
-    if name in {"README.md", "index.md", "log.md"}:
+    if name in {"README.md", "index.md"}:
         return True
     if not name.startswith("index-"):
         return False
@@ -122,25 +118,41 @@ def allow_with_message(message: str) -> None:
 
 
 def handle_bash(command: str, root: Path) -> None:
-    # Strip quotes and backslashes before matching, otherwise shell quoting or
+    # Join backslash line-continuations (`\` + newline) back onto one line first.
+    # Otherwise the next step strips the backslash and leaves a bare newline,
+    # making a single command (`rm -rf \<newline>wiki`, `cat >\<newline>wiki/x.md`)
+    # look like two lines and slip past the checks below.
+    command = re.sub(r"\\\r?\n", " ", command)
+    # Then strip quotes and remaining backslashes, otherwise shell quoting or
     # escaping like "wiki"/x.md, "tee", or wi\ki slips past the regexes below.
     command = command.replace('"', "").replace("'", "").replace("\\", "")
     # Deny any destructive op (rm/git rm/mv) that references the wiki directory,
     # whether a specific page (wiki/p.md), a glob (wiki/*), or the dir itself
-    # (rm -rf wiki). `wiki` must be a path segment, so unrelated names like
+    # (rm -rf wiki). Matched against the whole command, not per pipeline segment:
+    # pipes (find wiki | xargs rm), variables, and backgrounding can put `rm` and
+    # its `wiki` target in different segments while still acting on wiki, so
+    # segmenting would let them through. This over-denies (rm /tmp/x combined
+    # with git add wiki/y is also blocked), but over-deny is the safe direction
+    # for a backstop; to mix a delete and a wiki op in one Bash call, split it
+    # into two calls. `wiki` must be a path segment, so unrelated names like
     # wiki-notes.txt do not match.
     destructive = re.search(r"\b(rm|git\s+rm|mv)\b", command, re.IGNORECASE)
     references_wiki = re.search(r"(?<![\w.-])wiki(?=/|['\"\s]|$)", command, re.IGNORECASE)
     if destructive and references_wiki:
-        deny("刪除或移動 wiki 目錄或頁面")
+        deny("刪除或移動 wiki 目錄或頁面（若 rm/mv 與 wiki 無關、只是同一行順手清暫存檔，把它拆成獨立的 Bash 呼叫即可）")
     # Shell redirects / tee into wiki (cat > wiki/x.md, tee -a wiki/x.md) would
-    # bypass the Write/Edit confidence check, so they are denied. [^|;&]* keeps
-    # the match inside one pipeline segment, so reads out of wiki like
-    # `cat wiki/a.md > /tmp/b` are not caught. Scope note: only >, >>, and tee
-    # are covered; other file-writing tricks (python -c, curl -o, ...) cannot
-    # be enumerated by regex — the limitation is documented in wiki-workflow.md.
+    # bypass the Write/Edit confidence check, so they are denied. `[^|&;\r\n]*`
+    # keeps `> ... wiki/` inside one command: `| & ;` and newlines all terminate
+    # a command, so a `>` and a `wiki/` on different lines are not the same
+    # redirect. This avoids false positives such as a `>` on one line of a
+    # `git commit -F` heredoc message and a `wiki/` on another; genuine line
+    # continuations were already joined above, so real redirects still match.
+    # A read out of wiki (`cat wiki/a.md > /tmp/b`, `>` after `wiki/`) is not
+    # caught. Scope note: only >, >>, and tee are covered; >&wiki, python -c,
+    # curl -o, and similar cannot be enumerated by regex — the limitation is
+    # documented in wiki-workflow.md.
     writes_into_wiki = re.search(
-        r"(?:>{1,2}|\btee\b(?:\s+-a)?)[^|;&]*(?<![\w.-])wiki/", command, re.IGNORECASE
+        r"(?:>{1,2}|\btee\b(?:\s+-a)?)[^|&;\r\n]*(?<![\w.-])wiki/", command, re.IGNORECASE
     )
     if writes_into_wiki:
         deny("透過 shell 重導向或 tee 寫入 wiki")
@@ -205,18 +217,11 @@ def handle_write_edit(tool_name: str, tool_input: dict, root: Path) -> None:
     if rel is None:
         allow_silent()  # not a wiki path -> gate is inert
 
-    # Rule 2: the weekly log tree is maintenance (wiki/log/index.md,
-    # wiki/log/<year>/<monday>.md) — allowed without confidence, .md only.
-    if len(rel.parts) > 2 and rel.parts[1] == "log":
-        if rel.suffix != ".md":
-            deny("寫到 wiki/log/ 樹裡不允許的檔案類型（僅 .md）")
-        allow_silent()
-
-    # Rule 3: knowledge pages must be flat wiki/<name>.md
+    # Rule 2: knowledge pages must be flat wiki/<name>.md
     if len(rel.parts) != 2 or rel.suffix != ".md":
-        deny("寫到 wiki/ 樹裡不允許的位置（需扁平的 wiki/<name>.md 或 wiki/log/ 週檔）")
+        deny("寫到 wiki/ 樹裡不允許的位置（需扁平的 wiki/<name>.md）")
 
-    # Rule 4: maintenance files carry no confidence
+    # Rule 3: maintenance files carry no confidence
     if is_maintenance(rel.name, root):
         allow_silent()
 

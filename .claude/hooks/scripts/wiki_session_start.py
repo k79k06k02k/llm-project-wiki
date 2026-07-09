@@ -63,9 +63,9 @@ def write_policy_text(policy: str, flavor: str = "claude") -> str:
             "Wiki write policy (wiki.config.json): human approval NOT required "
             "(open). When you find durable knowledge, you may write the wiki page "
             "directly without waiting for approval — still maintain the two-level "
-            "index (wiki/index.md + wiki/index-<slug>.md), append to the current "
-            "week's log file under wiki/log/, and output a wiki evaluation marker "
-            '(e.g. "Wiki suggestion") so the Stop hook passes.'
+            "index (wiki/index.md + wiki/index-<slug>.md) and output a wiki "
+            'evaluation marker (e.g. "Wiki suggestion") so the Stop hook passes. '
+            "Change history lives in git, so there is no log file to update."
         )
     if policy == "auto":
         if flavor == "codex":
@@ -77,8 +77,7 @@ def write_policy_text(policy: str, flavor: str = "claude") -> str:
                 "then disclose the diff. If the resulting confidence would be `medium`, "
                 "`low`, or missing — or for any delete or wrong-location write — do not "
                 'write; propose it with the "Wiki suggestion" format instead. Still '
-                "maintain the two-level index and append to the current week's log "
-                "file under wiki/log/, and emit a wiki evaluation marker."
+                "maintain the two-level index and emit a wiki evaluation marker."
             )
         return (
             "Wiki write policy (wiki.config.json): auto. You may write a wiki page "
@@ -89,9 +88,9 @@ def write_policy_text(policy: str, flavor: str = "claude") -> str:
             'proposed with the "Wiki suggestion" format instead. High-confidence '
             "writes are allowed, but the gate surfaces their diff to the human, so "
             "set confidence honestly. Still maintain the two-level index "
-            "(wiki/index.md + wiki/index-<slug>.md), append to the current week's "
-            "log file under wiki/log/, and output a wiki evaluation marker so the "
-            "Stop hook passes."
+            "(wiki/index.md + wiki/index-<slug>.md) and output a wiki evaluation "
+            "marker so the Stop hook passes. Change history lives in git, so there "
+            "is no log file to update."
         )
     return (
         "Wiki write policy (wiki.config.json): human approval REQUIRED. "
@@ -188,12 +187,11 @@ def main() -> None:
             "keywords column semantically; only fall back to step 3 when nothing "
             "matches.\n"
             "2. Read wiki/index-<slug>.md for that category's full page list.\n"
-            "3. Otherwise grep: rg \"<keyword>\" wiki/ -g '!index*.md' -g '!log'\n"
+            "3. Otherwise grep: rg \"<keyword>\" wiki/ -g '!index*.md'\n"
             "4. Tag filter: .claude/scripts/wiki-search.sh -t <tag> (or: "
             "rg \"^tags:.*<tag>\" wiki/ -g '!index*.md')\n"
             "Do not Read the full wiki/index.md (this summary already covers it). "
-            "Do not read wiki/log/ by default; for change history, rg over "
-            "wiki/log/ or open a specific weekly file.\n\n"
+            "For a page's change history, use git log wiki/<page>.md.\n\n"
             f"{codex_rule}{policy_text}"
         )
         return

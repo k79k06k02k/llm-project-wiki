@@ -7,7 +7,7 @@
 #   wiki-search.sh -t <tag> <query>     # tag + full-text
 #   wiki-search.sh -- <query>           # after --, the query may start with - (search CLI flag text)
 #
-# Always excluded: index*.md, log/, README.md (per wiki-workflow.md)
+# Always excluded: index*.md, README.md (per wiki-workflow.md)
 
 set -euo pipefail
 
@@ -24,7 +24,7 @@ if [[ ! -d "$WIKI_DIR" ]]; then
     exit 1
 fi
 
-EXCLUDES=(-g '!index*.md' -g '!log' -g '!README.md')
+EXCLUDES=(-g '!index*.md' -g '!README.md')
 
 TAG=""
 QUERY=""
@@ -85,8 +85,7 @@ if [[ -n "$TAG" ]]; then
         exit 0
     fi
 else
-    # maxdepth 1 already excludes the wiki/log/ subfolder; only same-level
-    # index*/README need explicit exclusion here
+    # The wiki is flat; maxdepth 1 with index*/README excluded is the full set
     CANDIDATES=$(find "$WIKI_DIR" -maxdepth 1 -type f -name '*.md' \
         ! -name 'index*.md' ! -name 'README.md')
 fi

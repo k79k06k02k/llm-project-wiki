@@ -139,8 +139,6 @@ copy_if_missing "$SOURCE_DIR/wiki/index-architecture.md" "$TARGET_DIR/wiki/index
 copy_if_missing "$SOURCE_DIR/wiki/index-integrations.md" "$TARGET_DIR/wiki/index-integrations.md"
 copy_if_missing "$SOURCE_DIR/wiki/index-debugging.md" "$TARGET_DIR/wiki/index-debugging.md"
 copy_if_missing "$SOURCE_DIR/wiki/index-decisions.md" "$TARGET_DIR/wiki/index-decisions.md"
-copy_if_missing "$SOURCE_DIR/wiki/log/index.md" "$TARGET_DIR/wiki/log/index.md"
-copy_if_missing "$SOURCE_DIR/wiki/log/2026/2026-05-11.md" "$TARGET_DIR/wiki/log/2026/2026-05-11.md"
 copy_if_missing "$SOURCE_DIR/wiki/system-overview.md" "$TARGET_DIR/wiki/system-overview.md"
 copy_if_missing "$SOURCE_DIR/wiki.config.json" "$TARGET_DIR/wiki.config.json"
 
