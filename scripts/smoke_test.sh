@@ -42,20 +42,22 @@ run_case() {
 }
 
 LONG_MESSAGE="$(python3 - <<'PY'
-print("This is a substantial response. " * 60)
+print("This is a substantial response mentioning git commit. " * 60)
 PY
 )"
 SESSION_PREFIX="smoke-$(date +%s)-$$"
+
+# No commit ran this session: even a long reply that mentions "git commit" is
+# allowed. The Stop hook is commit-driven now, not length/prose-driven.
+run_case "long response without a commit is allowed" \
+  "$CLAUDE_HOOK" \
+  "{\"session_id\":\"$SESSION_PREFIX-long\",\"last_assistant_message\":\"$LONG_MESSAGE\"}" \
+  "allow"
 
 run_case "short response is allowed" \
   "$CLAUDE_HOOK" \
   "{\"session_id\":\"$SESSION_PREFIX-short\",\"last_assistant_message\":\"Done.\"}" \
   "allow"
-
-run_case "long response without marker is blocked" \
-  "$CLAUDE_HOOK" \
-  "{\"session_id\":\"$SESSION_PREFIX-long\",\"last_assistant_message\":\"$LONG_MESSAGE\"}" \
-  "block"
 
 run_case "wiki suggestion marker is allowed" \
   "$CLAUDE_HOOK" \
@@ -65,6 +67,25 @@ run_case "wiki suggestion marker is allowed" \
 run_case "no updates marker is allowed" \
   "$CLAUDE_HOOK" \
   "{\"session_id\":\"$SESSION_PREFIX-none\",\"last_assistant_message\":\"No wiki updates needed\"}" \
+  "allow"
+
+# Two-phase commit trigger: mark-commit observes a real `git commit` Bash call,
+# then a Stop with no marker in the same session is blocked.
+commit_session="$SESSION_PREFIX-commit"
+printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m x\"},\"session_id\":\"$commit_session\"}" \
+  | python3 "$CLAUDE_HOOK" mark-commit >/dev/null
+run_case "commit without marker is blocked" \
+  "$CLAUDE_HOOK" \
+  "{\"session_id\":\"$commit_session\",\"last_assistant_message\":\"All done, changes committed.\"}" \
+  "block"
+
+# A marker after a pending commit clears the flag and is allowed.
+marker_session="$SESSION_PREFIX-commit-marker"
+printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m x\"},\"session_id\":\"$marker_session\"}" \
+  | python3 "$CLAUDE_HOOK" mark-commit >/dev/null
+run_case "commit with marker is allowed" \
+  "$CLAUDE_HOOK" \
+  "{\"session_id\":\"$marker_session\",\"last_assistant_message\":\"No wiki updates needed\"}" \
   "allow"
 
 echo
@@ -80,6 +101,7 @@ test -f "$empty_target/.claude/settings.json"
 test -f "$empty_target/.claude/hooks/scripts/wiki_session_start.py"
 test -f "$empty_target/.claude/hooks/scripts/wiki_stop_hook.py"
 test -f "$empty_target/.claude/hooks/scripts/wiki_write_gate.py"
+test -f "$empty_target/.claude/hooks/scripts/wiki_lint.py"
 test -x "$empty_target/.claude/scripts/wiki-search.sh"
 test -f "$empty_target/wiki/index-architecture.md"
 test -f "$empty_target/wiki/index-integrations.md"
@@ -117,6 +139,11 @@ test "$(cd "$empty_target/wiki" && sh -c "$codex_session_start_index_cmd" | pyth
 test "$(cd "$empty_target/wiki" && sh -c "$codex_session_start_git_cmd" | python3 -c 'import json,sys; print("Git status:" in json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"])')" = "True"
 
 echo "PASS: installed Claude and Codex session hooks run from a project subdirectory"
+
+# The seeded wiki must pass wiki_lint cleanly.
+lint_output="$(python3 "$empty_target/.claude/hooks/scripts/wiki_lint.py" "$empty_target")"
+test "$lint_output" = "wiki lint: OK"
+echo "PASS: seeded wiki passes wiki_lint"
 
 # Write policy: install.sh ships wiki.config.json (write_policy: require_approval).
 test -f "$empty_target/wiki.config.json"

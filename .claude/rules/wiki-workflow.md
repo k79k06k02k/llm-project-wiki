@@ -12,6 +12,7 @@ The project keeps a shared, git-tracked wiki in `wiki/`. The AI agent may propos
    5. As a last resort, raw ripgrep: `rg "<keyword>" wiki/ -g '!index*.md'`.
    - Do not proactively read the full `wiki/index.md` — the injected summary already covers the category layer.
    - The wiki keeps no tracked change log; when you need a page's history, use `git log wiki/<page>.md` (`--stat` for what changed, `-p` for the diff).
+   - SessionStart also runs `wiki_lint.py` (fail-soft). If a `⚠ Wiki lint` block appears in the injected context, the index/`confidence`/`related_pages` invariants are broken — fix them first when this session touches the wiki. See "Structural Lint" below.
 2. **During work**: Pause and consider a wiki suggestion when the conversation uncovers durable knowledge:
    - A cross-file system relationship.
    - A non-obvious bug root.
@@ -140,7 +141,7 @@ Under `auto`, the `PreToolUse` gate (`wiki_write_gate.py`) governs the `wiki/`
 tree only (writes elsewhere are untouched) and applies these rules in order,
 first match wins:
 
-1. **Bash `rm` / `git rm` / `mv`, or a shell redirect / `tee` into `wiki/`** → denied. Propose the change instead of deleting, moving, or redirecting into the wiki from a shell command. (The destructive check matches the whole command line, so if an unrelated `rm`/`mv` shares a line with a `wiki/` path, split it into two Bash calls.)
+1. **Bash `rm` / `git rm` / `mv` referencing a `wiki/` path** → denied. Propose the change instead of deleting or moving a wiki page from a shell command. The command is parsed into tokens (`shlex`, POSIX mode) so quoted prose like `-m "mentions rm and wiki/"` collapses into one token and never false-matches; `rm`/`mv` must be a whole token and `wiki` a path segment. The check is still an AND over the whole command line (not per pipeline segment), so if an unrelated `rm`/`mv` shares a line with a `wiki/` path, split it into two Bash calls.
 2. **Write/Edit to a non-flat or non-`.md` path inside `wiki/`** (a nested folder, or a non-Markdown file) → denied.
 3. **Write/Edit to `index*.md` or `README.md`** → allowed without a confidence check. `index-<slug>.md` is only exempt when that exact filename is listed in the directory column of `wiki/index.md` — otherwise any knowledge page could dodge the confidence check just by taking an `index-` prefix. If `wiki/index.md` is missing or unreadable, no `index-*` file is exempt (fail-closed).
 4. **Resulting frontmatter `confidence: high`** → allowed; the gate surfaces the diff (or, for a new page, a content preview) to the human.
@@ -152,12 +153,14 @@ first match wins:
 replaced by `new_string` — and reads `confidence` from the YAML frontmatter of
 that reconstructed content, not the confidence stated in conversation.
 
-**Bash detection is not exhaustive.** The gate only recognizes `rm`, `git rm`,
-`mv`, and shell redirects/`tee` (`>`, `>>`, `tee`) targeting a `wiki/` path.
-Other ways to write a file from a shell command — `python -c`, `curl -o`, and
-similar — are not covered; regex cannot enumerate every file-writing pattern.
-The gate is a backstop, not a complete guarantee: honest `confidence` labeling
-under `auto` remains an instruction-level obligation, not just a mechanical one.
+**Bash detection is deliberately narrow.** The gate only recognizes destructive
+ops — `rm`, `git rm`, `mv` — targeting a `wiki/` path. It does **not** detect
+shell writes into the wiki (redirects `>`/`>>`, `tee`, `python -c`, `curl -o`,
+and similar): a blacklist regex can never enumerate every file-writing pattern,
+so that detection was removed rather than kept as a leaky half-measure. Writing
+the wiki **only via `Write`/`Edit`** (so the confidence check actually runs) is
+an instruction-level obligation, not a mechanical one. The gate is a backstop,
+not a complete guarantee: honest `confidence` labeling under `auto` is on you.
 
 This gate is Claude-specific; the Codex layer has no PreToolUse mechanism, so
 it applies the same rules by self-discipline through the SessionStart-injected
@@ -182,12 +185,17 @@ the user approves.
 
 ## Stop Hook Markers
 
-The Claude Stop hook checks whether wiki evaluation happened by scanning for one of these markers:
+The Claude wiki evaluation is enforced at the **tool layer**, not by reading prose. Two hooks share `wiki_stop_hook.py`:
+
+- A `PostToolUse` hook on `Bash` (`mark-commit` mode) watches the commands you actually run. When one runs `git commit`, it sets a `pending_commit` flag in the session's state file.
+- The `Stop` hook blocks the turn **only when a commit is pending and the final message carries no evaluation marker**. A marker clears the flag; anti-loop caps it at two blocks per turn.
+
+The markers the Stop hook scans for:
 
 - `Wiki suggestion`
 - `No wiki updates needed`
 
-Use `Wiki suggestion` when proposing an update. Use `No wiki updates needed` when the session produced no durable wiki-worthy knowledge. In Codex, do not add no-op markers solely for the hook; keep the transcript clean.
+Use `Wiki suggestion` when proposing an update. Use `No wiki updates needed` when the commit produced no durable wiki-worthy knowledge. Replies that merely *mention* a commit never block — only an actually-executed `git commit` arms the check, so long design discussions and command examples pass freely. In Codex, do not add no-op markers solely for the hook; keep the transcript clean.
 
 ## Page Format
 
@@ -218,6 +226,25 @@ related_pages:
   ```
   Check this project's actual output before picking a tag; do not assume any
   specific tag list — a fresh project starts with none.
+
+## Structural Lint
+
+`.claude/hooks/scripts/wiki_lint.py` is a deterministic checker for the wiki's
+structural invariants — the things the maintenance checklists below keep by
+hand. It verifies:
+
+1. Each category's `Pages` count in `wiki/index.md` matches its `index-<slug>.md` entry count.
+2. Every index entry points to a file that exists, and no page is listed under more than one category.
+3. Every knowledge page is listed by some `index-<slug>.md` (no orphans).
+4. Every page's frontmatter `confidence` is one of `high` / `medium` / `low`.
+5. Every `related_pages` target exists (no dead links).
+
+It runs two ways: SessionStart calls it and injects a `⚠ Wiki lint` warning
+when anything is broken (fail-soft — a lint error never blocks session start),
+and you can run it directly with `python3 .claude/hooks/scripts/wiki_lint.py`
+(exits non-zero and prints each problem when the wiki is inconsistent). The gate
+under `auto` does **not** check index consistency, so lint is the safety net
+that catches a forgotten count bump or a dead link regardless of write policy.
 
 ## Maintenance Rules
 

@@ -27,6 +27,7 @@ The point is not to create another documentation folder. The point is to make pr
 │   ├── hooks/scripts/wiki_stop_hook.py
 │   ├── hooks/scripts/wiki_session_start.py
 │   ├── hooks/scripts/wiki_write_gate.py
+│   ├── hooks/scripts/wiki_lint.py
 │   ├── rules/wiki-workflow.md
 │   ├── scripts/wiki-search.sh
 │   ├── settings.json
@@ -75,7 +76,7 @@ Please integrate LLM Project Wiki into the current project: https://github.com/k
 Run `scripts/install.sh` from that repository.
 ```
 
-Then open the target project with Claude Code or Codex. On session start, the agent should receive the wiki index as additional context. Claude Code uses a blocking stop hook for substantial responses; Codex registers no stop hook and relies on injected instructions so the transcript is not polluted by hook feedback. Both tools share one `wiki_session_start.py` script (under `.claude/hooks/scripts/`); the Codex hooks call it with a `codex` flavor argument.
+Then open the target project with Claude Code or Codex. On session start, the agent should receive the wiki index as additional context (plus a `⚠ Wiki lint` warning if `wiki_lint.py` finds a broken structural invariant). Claude Code detects commits at the tool layer: a `PostToolUse` hook flags the session when a `git commit` actually runs, and the `Stop` hook then asks for a wiki evaluation only when a commit is pending and no marker was emitted — so ordinary long replies are never blocked. Codex registers no stop hook and relies on injected instructions so the transcript is not polluted by hook feedback. Both tools share one `wiki_session_start.py` script (under `.claude/hooks/scripts/`); the Codex hooks call it with a `codex` flavor argument.
 
 The installer is designed for existing projects:
 

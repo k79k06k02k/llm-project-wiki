@@ -318,8 +318,11 @@ class GateTestCase(unittest.TestCase):
         )
         self.assertEqual(decision(out), "deny")
 
-    # Shell redirect / tee into wiki -> deny (>, >>, tee, tee -a).
-    def test_bash_redirect_into_wiki_denies(self):
+    # Shell redirects / tee into wiki are deliberately NOT detected anymore: a
+    # blacklist regex could never enumerate every write path, so that check was
+    # removed. "Write the wiki only via Write/Edit" is an instruction-layer rule
+    # now (see wiki-workflow.md). A redirect into wiki is therefore inert.
+    def test_bash_redirect_into_wiki_now_inert(self):
         for cmd in (
             "cat > wiki/sneaky.md",
             "echo x >> wiki/sneaky.md",
@@ -327,31 +330,39 @@ class GateTestCase(unittest.TestCase):
             "sort input | tee -a wiki/sneaky.md",
         ):
             out = run_gate(self.Bash(cmd), self.root)
-            self.assertEqual(decision(out), "deny", f"cmd not denied: {cmd}")
+            self.assertIsNone(decision(out), f"cmd unexpectedly denied: {cmd}")
 
-    # A redirect that reads out of wiki (target is outside wiki/) must not be
-    # falsely denied.
+    # A redirect reading out of wiki was never denied; still inert.
     def test_bash_redirect_out_of_wiki_inert(self):
         out = run_gate(self.Bash("cat wiki/p.md > /tmp/out.md"), self.root)
         self.assertIsNone(decision(out))
 
-    # Backslash line-continuations are joined before matching, so a single
-    # command split across lines with `\` is still caught.
-    def test_bash_backslash_continuation_redirect_denies(self):
-        out = run_gate(self.Bash("cat foo >\\\nwiki/sneaky.md"), self.root)
-        self.assertEqual(decision(out), "deny")
-
+    # Backslash line-continuations are joined before tokenizing, so an rm split
+    # across lines with `\` is still caught.
     def test_bash_backslash_continuation_rm_denies(self):
         out = run_gate(self.Bash("rm -rf \\\nwiki"), self.root)
         self.assertEqual(decision(out), "deny")
 
-    # A `>` on one line and a `wiki/` on a *separate* line (no continuation) are
-    # not the same redirect — e.g. a `git commit -F` heredoc message — so the
-    # redirect check must not false-deny across the newline.
-    def test_bash_redirect_and_wiki_on_separate_lines_inert(self):
-        cmd = "git commit -F - <<'EOF'\nfix: pipe output > result\nupdate wiki/x notes\nEOF"
+    # Heredoc bodies are stdin data, not commands: a bare `rm wiki/...` or a
+    # `wiki/` mention inside a `git commit -F-` heredoc must not false-deny.
+    def test_bash_heredoc_body_rm_wiki_inert(self):
+        cmd = "git commit -F- <<'EOF'\nrm the wiki/old.md later\nfix: pipe output > result\nEOF"
         out = run_gate(self.Bash(cmd), self.root)
         self.assertIsNone(decision(out))
+
+    # Quoted prose collapses into a single shlex token, so `rm` / `wiki/` inside
+    # a commit message is not mistaken for a destructive op.
+    def test_bash_quoted_prose_rm_wiki_inert(self):
+        out = run_gate(
+            self.Bash('git commit -m "remember to rm the wiki/old.md later"'), self.root
+        )
+        self.assertIsNone(decision(out))
+
+    # An unparseable command (unbalanced quote) falls back to the conservative
+    # whole-string scan, which still catches rm + wiki.
+    def test_bash_unparseable_rm_wiki_fallback_denies(self):
+        out = run_gate(self.Bash('rm wiki/p.md "oops unclosed'), self.root)
+        self.assertEqual(decision(out), "deny")
 
     # macOS APFS is case-insensitive: a WIKI/ path must be treated the same as
     # wiki/ and must not bypass the confidence check.
@@ -363,15 +374,14 @@ class GateTestCase(unittest.TestCase):
         out = run_gate(self.Bash("rm WIKI/p.md"), self.root)
         self.assertEqual(decision(out), "deny")
 
-    # Shell quoting / backslash-escaping bypasses: the command is normalized
-    # (quotes and backslashes stripped) before matching.
-    def test_bash_quoted_wiki_segment_denies(self):
+    # Quoting/escaping obfuscation of a destructive op still denies: shlex posix
+    # mode normalizes wi"ki" and wi\ki back to a plain wiki token.
+    def test_bash_quoted_rm_wiki_segment_denies(self):
         for cmd in (
-            'echo x > "wiki"/new.md',
-            "echo x > 'wiki'/new.md",
-            '"tee" wiki/new.md',
             'rm -rf wi"ki"',
+            "rm -rf wi'ki'",
             "rm -rf wi\\ki",
+            'rm "wiki"/p.md',
         ):
             out = run_gate(self.Bash(cmd), self.root)
             self.assertEqual(decision(out), "deny", f"cmd not denied: {cmd}")

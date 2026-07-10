@@ -30,6 +30,18 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "script=\"$CLAUDE_PROJECT_DIR/.claude/hooks/scripts/wiki_stop_hook.py\"; if test -f \"$script\"; then python3 \"$script\" mark-commit; else echo '{}'; fi",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

@@ -10,7 +10,7 @@ flat: change history lives in git (`git log wiki/<page>.md`), not in a tracked
 log file, so the gate only knows about knowledge pages and the index.
 
 Classification (first match wins):
-  1. Bash rm/git rm/mv or shell redirect/tee into wiki -> deny
+  1. Bash rm/git rm/mv referencing wiki                -> deny
   2. Write/Edit to a non-flat or non-.md wiki path     -> deny
   3. index*.md / README.md maintenance                 -> allow (no confidence)
   4. resulting confidence == high                      -> allow + surface diff
@@ -21,6 +21,7 @@ Classification (first match wins):
 import difflib
 import json
 import re
+import shlex
 import sys
 from pathlib import Path
 
@@ -92,8 +93,9 @@ def deny(reason: str) -> None:
                     "hookEventName": "PreToolUse",
                     "permissionDecision": "deny",
                     "permissionDecisionReason": (
-                        f"{reason}；這是高風險的 wiki 操作。請用「Wiki suggestion」"
-                        "格式提案並等待批准，不要直接寫入。"
+                        f"{reason}. This is a high-risk wiki operation. Propose it "
+                        'with the "Wiki suggestion" format and wait for approval; '
+                        "do not write directly."
                     ),
                 }
             }
@@ -117,45 +119,95 @@ def allow_with_message(message: str) -> None:
     sys.exit(0)
 
 
+def _strip_heredocs(command: str) -> str:
+    """Strip heredoc bodies (<<EOF … EOF) — the body is stdin data, not command.
+
+    Leaving it in lets bare `rm` / `wiki` tokens inside the body leak out (a
+    `git commit -F-` heredoc message false-positived in practice). When the
+    terminator is missing, strip to end of string (everything after an
+    unterminated heredoc is body anyway).
+    """
+    return re.sub(
+        r"<<-?\s*(['\"]?)(\w+)\1.*?(?:\n\2(?=\s|$)|\Z)",
+        " ",
+        command,
+        flags=re.DOTALL,
+    )
+
+
+def _bash_tokens(command: str) -> list[str] | None:
+    """shlex tokenization (posix + punctuation_chars); None on parse failure.
+
+    posix mode is the crux: quoted arguments collapse into a *single* token, so
+    `-m "message mentioning rm and wiki/"` cannot be confused with real command
+    tokens; meanwhile wi"ki" / wi\\ki style quoting confusion normalizes back to
+    wiki, so obfuscated bypasses are still caught.
+    """
+    try:
+        lex = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        return list(lex)
+    except ValueError:
+        return None
+
+
+def _has_wiki_segment(token: str) -> bool:
+    """Whether any `/`-delimited path segment of the token is wiki.
+
+    Case-insensitive: APFS is case-insensitive, so a WIKI/ variant must match.
+    """
+    return any(segment.lower() == "wiki" for segment in token.split("/"))
+
+
 def handle_bash(command: str, root: Path) -> None:
-    # Join backslash line-continuations (`\` + newline) back onto one line first.
-    # Otherwise the next step strips the backslash and leaves a bare newline,
-    # making a single command (`rm -rf \<newline>wiki`, `cat >\<newline>wiki/x.md`)
-    # look like two lines and slip past the checks below.
+    # Join backslash line-continuations (`\` + newline) first: `rm -rf \<newline>wiki`
+    # is a single action.
     command = re.sub(r"\\\r?\n", " ", command)
-    # Then strip quotes and remaining backslashes, otherwise shell quoting or
-    # escaping like "wiki"/x.md, "tee", or wi\ki slips past the regexes below.
+    command = _strip_heredocs(command)
+
+    tokens = _bash_tokens(command)
+    if tokens is None:
+        _fallback_scan(command)
+        return
+
+    # Token-level "delete/move targeting wiki": rm/mv must be a whole token
+    # (quoted prose collapses into one long token and cannot match; `git rm`
+    # carries its own standalone rm token), and wiki must be a path segment of
+    # some token (/tmp/wiki-notes.txt does not match). Still an AND over the
+    # whole command, not per segment: cross-segment bypasses (find wiki | xargs
+    # rm) that split verb and target are still caught. To genuinely mix them,
+    # split into two Bash calls.
+    destructive = any(token in {"rm", "mv"} for token in tokens)
+    references_wiki = any(_has_wiki_segment(token) for token in tokens)
+    if destructive and references_wiki:
+        deny(
+            "delete or move of a wiki directory or page (if the rm/mv is "
+            "unrelated to the wiki and just clears a temp file on the same line, "
+            "split it into a separate Bash call)"
+        )
+    # Bash writes (redirect / tee / python -c …) are intentionally NOT detected:
+    # a blacklist regex can never enumerate them all, so the old >/>>/tee
+    # detection and its adversarial hardening were removed. "Write the wiki only
+    # via Write/Edit" is an instruction-layer obligation (see wiki-workflow.md,
+    # "Bash detection is not exhaustive"); do not grow write-detection regex back
+    # in here.
+    allow_silent()
+
+
+def _fallback_scan(command: str) -> None:
+    # Reached only when shlex cannot parse: the old whole-string regex (strip
+    # quotes + backslashes, then match). It cannot separate quoted prose and
+    # will over-deny — a safe direction for a backstop; fix the quoting or split
+    # the command to get unstuck.
     command = command.replace('"', "").replace("'", "").replace("\\", "")
-    # Deny any destructive op (rm/git rm/mv) that references the wiki directory,
-    # whether a specific page (wiki/p.md), a glob (wiki/*), or the dir itself
-    # (rm -rf wiki). Matched against the whole command, not per pipeline segment:
-    # pipes (find wiki | xargs rm), variables, and backgrounding can put `rm` and
-    # its `wiki` target in different segments while still acting on wiki, so
-    # segmenting would let them through. This over-denies (rm /tmp/x combined
-    # with git add wiki/y is also blocked), but over-deny is the safe direction
-    # for a backstop; to mix a delete and a wiki op in one Bash call, split it
-    # into two calls. `wiki` must be a path segment, so unrelated names like
-    # wiki-notes.txt do not match.
     destructive = re.search(r"\b(rm|git\s+rm|mv)\b", command, re.IGNORECASE)
     references_wiki = re.search(r"(?<![\w.-])wiki(?=/|['\"\s]|$)", command, re.IGNORECASE)
     if destructive and references_wiki:
-        deny("刪除或移動 wiki 目錄或頁面（若 rm/mv 與 wiki 無關、只是同一行順手清暫存檔，把它拆成獨立的 Bash 呼叫即可）")
-    # Shell redirects / tee into wiki (cat > wiki/x.md, tee -a wiki/x.md) would
-    # bypass the Write/Edit confidence check, so they are denied. `[^|&;\r\n]*`
-    # keeps `> ... wiki/` inside one command: `| & ;` and newlines all terminate
-    # a command, so a `>` and a `wiki/` on different lines are not the same
-    # redirect. This avoids false positives such as a `>` on one line of a
-    # `git commit -F` heredoc message and a `wiki/` on another; genuine line
-    # continuations were already joined above, so real redirects still match.
-    # A read out of wiki (`cat wiki/a.md > /tmp/b`, `>` after `wiki/`) is not
-    # caught. Scope note: only >, >>, and tee are covered; >&wiki, python -c,
-    # curl -o, and similar cannot be enumerated by regex — the limitation is
-    # documented in wiki-workflow.md.
-    writes_into_wiki = re.search(
-        r"(?:>{1,2}|\btee\b(?:\s+-a)?)[^|&;\r\n]*(?<![\w.-])wiki/", command, re.IGNORECASE
-    )
-    if writes_into_wiki:
-        deny("透過 shell 重導向或 tee 寫入 wiki")
+        deny(
+            "delete or move of a wiki directory or page (the command has "
+            "unbalanced quotes, so the whole line is judged conservatively; fix "
+            "the quoting or split into two calls)"
+        )
     allow_silent()
 
 
@@ -184,7 +236,7 @@ def change_message(rel: Path, tool_name: str, tool_input: dict, target: Path) ->
         old = tool_input.get("old_string", "")
         new = tool_input.get("new_string", "")
         body = f"- {old}\n+ {new}"
-        return f"Wiki：對 {name} 的高信心寫入。改動：\n{body}"
+        return f"Wiki: high-confidence write to {name}. Change:\n{body}"
     # Write
     new_content = tool_input.get("content", "")
     if target.exists():
@@ -200,9 +252,9 @@ def change_message(rel: Path, tool_name: str, tool_input: dict, target: Path) ->
                 tofile=name,
             )
         )
-        return f"Wiki：對 {name} 的高信心寫入。改動：\n{diff}"
+        return f"Wiki: high-confidence write to {name}. Change:\n{diff}"
     preview = "\n".join(new_content.splitlines()[:12])
-    return f"Wiki：建立高信心新頁 {name}。內容預覽：\n{preview}"
+    return f"Wiki: new high-confidence page {name}. Content preview:\n{preview}"
 
 
 def handle_write_edit(tool_name: str, tool_input: dict, root: Path) -> None:
@@ -219,7 +271,7 @@ def handle_write_edit(tool_name: str, tool_input: dict, root: Path) -> None:
 
     # Rule 2: knowledge pages must be flat wiki/<name>.md
     if len(rel.parts) != 2 or rel.suffix != ".md":
-        deny("寫到 wiki/ 樹裡不允許的位置（需扁平的 wiki/<name>.md）")
+        deny("write to a disallowed location inside the wiki/ tree (must be a flat wiki/<name>.md)")
 
     # Rule 3: maintenance files carry no confidence
     if is_maintenance(rel.name, root):
@@ -227,14 +279,14 @@ def handle_write_edit(tool_name: str, tool_input: dict, root: Path) -> None:
 
     content = resulting_content(tool_name, tool_input, target)
     if content is None:
-        deny("無法判定寫入後的頁面內容")
+        deny("cannot determine the resulting page content")
 
     confidence = parse_confidence(content)
     if confidence == "high":
         allow_with_message(change_message(rel, tool_name, tool_input, target))
     if confidence in {"medium", "low"}:
-        deny(f"寫入後頁面 confidence 為 {confidence}")
-    deny("寫入後頁面 confidence 缺失或無法解析")
+        deny(f"resulting page confidence is {confidence}")
+    deny("resulting page confidence is missing or unparseable")
 
 
 def main() -> None:

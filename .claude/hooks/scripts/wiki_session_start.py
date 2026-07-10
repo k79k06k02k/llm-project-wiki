@@ -112,6 +112,30 @@ def emit_context(text: str) -> None:
     )
 
 
+def lint_warning(root: Path) -> str:
+    """Warning block for wiki structural problems, or "" when clean.
+
+    Fail-soft: a broken lint must never break session start.
+    """
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from wiki_lint import lint_wiki
+
+        problems = lint_wiki(root)
+    except Exception:
+        return ""
+    if not problems:
+        return ""
+    shown = problems[:10]
+    more = f"\n  …and {len(problems)} problems in total" if len(problems) > 10 else ""
+    return (
+        "\n\n⚠ Wiki lint found structural problems (index/confidence/related_pages "
+        "invariants broken). When this session touches the wiki, fix these first:\n"
+        + "\n".join(f"  - {p}" for p in shown)
+        + more
+    )
+
+
 def git_output(root: Path, args: list[str]) -> str:
     try:
         return subprocess.check_output(
@@ -192,7 +216,7 @@ def main() -> None:
             "rg \"^tags:.*<tag>\" wiki/ -g '!index*.md')\n"
             "Do not Read the full wiki/index.md (this summary already covers it). "
             "For a page's change history, use git log wiki/<page>.md.\n\n"
-            f"{codex_rule}{policy_text}"
+            f"{codex_rule}{policy_text}{lint_warning(root)}"
         )
         return
 
