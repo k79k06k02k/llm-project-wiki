@@ -8,7 +8,6 @@ hash of the session id; tests use unique ids and clean up after themselves.
 import importlib.util
 import json
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -23,6 +22,7 @@ HOOK = (
     / "scripts"
     / "wiki_stop_hook.py"
 )
+CODEX_HOOKS = Path(__file__).resolve().parents[1] / ".codex" / "hooks.json"
 
 spec = importlib.util.spec_from_file_location("wiki_stop_hook", HOOK)
 mod = importlib.util.module_from_spec(spec)
@@ -37,7 +37,7 @@ PROSE_MSG = (
 )
 
 
-def run_hook(payload, mode=None, raw_stdin=None):
+def run_hook(payload, mode=None, raw_stdin=None, require_output=False):
     argv = [sys.executable, str(HOOK)] + ([mode] if mode else [])
     proc = subprocess.run(
         argv,
@@ -47,6 +47,8 @@ def run_hook(payload, mode=None, raw_stdin=None):
     )
     assert proc.returncode == 0, f"hook exited {proc.returncode}: {proc.stderr}"
     out = proc.stdout.strip()
+    if require_output:
+        assert out, "hook exited 0 without the required JSON stdout"
     return json.loads(out) if out else {}
 
 
@@ -115,13 +117,96 @@ class StopHookTestCase(unittest.TestCase):
     def test_pending_persists_until_marker(self):
         self.mark()
         self.assertEqual(self.stop("First reply after commit").get("decision"), "block")
-        self.assertEqual(self.stop("Adding the evaluation. No wiki updates needed"), {})
+        self.assertEqual(self.stop("Adding the evaluation.\nNo wiki updates needed"), {})
 
     # malformed stdin must not crash or block
     def test_non_dict_stdin_allows(self):
         self.assertEqual(run_hook(None, raw_stdin="[]"), {})
         self.assertEqual(run_hook(None, raw_stdin="not json"), {})
         self.assertEqual(run_hook(None, mode="mark-commit", raw_stdin="[]"), {})
+
+
+class CodexStopHookTestCase(unittest.TestCase):
+    """Codex evaluates every final response, with one-block loop protection."""
+
+    def stop(self, msg, active=False):
+        return run_hook(
+            {
+                "session_id": f"codex-{uuid.uuid4()}",
+                "hook_event_name": "Stop",
+                "last_assistant_message": msg,
+                "stop_hook_active": active,
+            },
+            mode="codex",
+            require_output=True,
+        )
+
+    def test_missing_marker_blocks_with_evaluation_prompt(self):
+        result = self.stop("Work complete.")
+        self.assertEqual(result.get("decision"), "block")
+        self.assertIn("No wiki suggestion", result.get("reason", ""))
+
+    def test_legacy_hidden_evaluated_marker_remains_compatible(self):
+        self.assertEqual(self.stop("Work complete.\n<!-- wiki-evaluated -->"), {})
+
+    def test_visible_suggestion_marker_allows(self):
+        self.assertEqual(self.stop("**Wiki suggestion**: record the new trap."), {})
+
+    def test_no_wiki_suggestion_marker_allows(self):
+        self.assertEqual(self.stop("No wiki suggestion"), {})
+
+    def test_no_updates_marker_remains_compatible(self):
+        self.assertEqual(self.stop("No wiki updates needed"), {})
+
+    def test_marker_mentioned_in_prose_does_not_allow(self):
+        result = self.stop(
+            "The docs say to output No wiki suggestion, but I did not evaluate it."
+        )
+        self.assertEqual(result.get("decision"), "block")
+
+    def test_marker_inside_code_fence_does_not_allow(self):
+        result = self.stop("Example:\n```\nNo wiki suggestion\n```")
+        self.assertEqual(result.get("decision"), "block")
+
+    def test_fence_prefix_with_trailing_text_does_not_close(self):
+        result = self.stop(
+            "```text\n```not-a-closing-fence\nNo wiki suggestion\n```"
+        )
+        self.assertEqual(result.get("decision"), "block")
+
+    def test_marker_inside_blockquote_code_fence_does_not_allow(self):
+        result = self.stop("> ```text\n> No wiki suggestion\n> ```")
+        self.assertEqual(result.get("decision"), "block")
+
+    def test_markdown_heading_marker_allows(self):
+        self.assertEqual(
+            self.stop("Work complete.\n\n## Wiki suggestion\n\nRecord the new trap."),
+            {},
+        )
+
+    def test_blockquote_suggestion_marker_allows(self):
+        self.assertEqual(
+            self.stop("> **Wiki suggestion**: record the new trap."),
+            {},
+        )
+
+    def test_active_stop_hook_allows_to_prevent_loop(self):
+        self.assertEqual(self.stop("Still no marker.", active=True), {})
+
+    def test_null_message_does_not_crash(self):
+        result = self.stop(None)
+        self.assertEqual(result.get("decision"), "block")
+
+    def test_malformed_input_allows_with_json_output(self):
+        self.assertEqual(
+            run_hook(
+                None,
+                mode="codex",
+                raw_stdin="not json",
+                require_output=True,
+            ),
+            {},
+        )
 
 
 class StateFileTestCase(unittest.TestCase):
@@ -145,6 +230,34 @@ class StateFileTestCase(unittest.TestCase):
         path = mod.state_file({"session_id": "../../etc/passwd"})
         self.assertTrue(path.startswith(tempfile.gettempdir()))
         self.assertRegex(Path(path).name, r"^wiki-stop-[0-9a-f]{16}\.json$")
+
+
+class CodexHookConfigTestCase(unittest.TestCase):
+    def test_codex_registers_wiki_stop_hook(self):
+        config = json.loads(CODEX_HOOKS.read_text(encoding="utf-8"))
+        commands = [
+            hook["command"]
+            for group in config["hooks"]["Stop"]
+            for hook in group["hooks"]
+        ]
+        self.assertEqual(len(commands), 1)
+
+        proc = subprocess.run(
+            ["/bin/sh", "-lc", commands[0]],
+            input=json.dumps(
+                {
+                    "session_id": f"config-{uuid.uuid4()}",
+                    "hook_event_name": "Stop",
+                    "last_assistant_message": "missing marker",
+                    "stop_hook_active": False,
+                }
+            ),
+            capture_output=True,
+            text=True,
+            cwd=CODEX_HOOKS.parents[1],
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(json.loads(proc.stdout)["decision"], "block")
 
 
 if __name__ == "__main__":

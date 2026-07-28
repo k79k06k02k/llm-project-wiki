@@ -17,6 +17,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "script=\"$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/hooks/scripts/wiki_stop_hook.py\"; if test -f \"$script\"; then python3 \"$script\" codex; else echo '{}'; fi",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }

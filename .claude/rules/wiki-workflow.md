@@ -18,9 +18,9 @@ The project keeps a shared, git-tracked wiki in `wiki/`. The AI agent may propos
    - A non-obvious bug root.
    - An answer to "why" that lives across several files.
    - A convention that future agents or developers will need.
-3. **Commit or PR work**: Before finishing substantial commit or PR work, evaluate whether the change should update the wiki.
-   - Multi-file or cross-system changes usually deserve evaluation.
-   - Small one-file edits usually do not.
+3. **Final-response enforcement**:
+   - Claude Code: after a real `git commit`, end with `Wiki suggestion` or `No wiki updates needed`.
+   - Codex: before every final response, end with `Wiki suggestion` or `No wiki suggestion`.
 4. **Manual trigger**: When the user asks for `wiki-review`, run the full wiki self-review flow.
 
 ## Index Structure
@@ -53,9 +53,9 @@ The wiki keeps no hand-maintained change log. A page's history is git's job — 
 Codex can run the same wiki flow through `.codex/hooks.json`.
 The Codex hooks call the shared `.claude/hooks/scripts/wiki_session_start.py`
 (with a `codex` flavor argument) to load the `wiki/index.md` category summary
-and git context, and register no `Stop` hook. Codex renders Stop hook blocks as
-visible Hook feedback and can create marker-only follow-up messages, so wiki
-self-review is handled through instructions instead of a Stop-time gate.
+and git context. Its `Stop` hook checks every final response for a standalone
+`Wiki suggestion` or `No wiki suggestion` line. A missing marker requests one
+retry; `stop_hook_active` prevents a second block from looping.
 
 Codex-specific details:
 
@@ -185,17 +185,28 @@ the user approves.
 
 ## Stop Hook Markers
 
-The Claude wiki evaluation is enforced at the **tool layer**, not by reading prose. Two hooks share `wiki_stop_hook.py`:
+Claude Code enforcement happens at the **tool layer**, not by reading prose. Two hooks share `wiki_stop_hook.py`:
 
 - A `PostToolUse` hook on `Bash` (`mark-commit` mode) watches the commands you actually run. When one runs `git commit`, it sets a `pending_commit` flag in the session's state file.
 - The `Stop` hook blocks the turn **only when a commit is pending and the final message carries no evaluation marker**. A marker clears the flag; anti-loop caps it at two blocks per turn.
 
-The markers the Stop hook scans for:
+Claude Code accepts:
 
 - `Wiki suggestion`
 - `No wiki updates needed`
 
-Use `Wiki suggestion` when proposing an update. Use `No wiki updates needed` when the commit produced no durable wiki-worthy knowledge. Replies that merely *mention* a commit never block — only an actually-executed `git commit` arms the check, so long design discussions and command examples pass freely. In Codex, do not add no-op markers solely for the hook; keep the transcript clean.
+Use `Wiki suggestion` when proposing an update. Use `No wiki updates needed`
+when the commit produced no durable wiki-worthy knowledge. Replies that merely
+*mention* a commit never block — only an actually-executed `git commit` arms
+the check.
+
+Codex checks every final response and accepts:
+
+- `Wiki suggestion`
+- `No wiki suggestion`
+
+Markers must occupy their own visible line outside fenced code blocks. A prose
+example that merely mentions a marker does not satisfy the hook.
 
 ## Page Format
 

@@ -158,10 +158,12 @@ def main() -> None:
             print("{}")
             return
         codex_rule = (
-            "Codex wiki review rule: every substantial final response must "
+            "Codex wiki review rule: before every final response, "
             "evaluate whether the conversation produced durable project "
             "knowledge. If yes, include a visible `Wiki suggestion`. If no, "
-            "do not add a visible no-op marker; keep the transcript clean.\n\n"
+            "output exactly `No wiki suggestion`. The Codex Stop hook checks "
+            "for one of these markers and requests one retry when the "
+            "evaluation was missed.\n\n"
             if flavor == "codex"
             else ""
         )

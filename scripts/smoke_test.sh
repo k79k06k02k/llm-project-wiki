@@ -132,11 +132,13 @@ claude_session_start_index_cmd="$(hook_cmd "$empty_target/.claude/settings.json"
 claude_session_start_git_cmd="$(hook_cmd "$empty_target/.claude/settings.json" SessionStart 1)"
 codex_session_start_index_cmd="$(hook_cmd "$empty_target/.codex/hooks.json" SessionStart 0)"
 codex_session_start_git_cmd="$(hook_cmd "$empty_target/.codex/hooks.json" SessionStart 1)"
+codex_stop_cmd="$(hook_cmd "$empty_target/.codex/hooks.json" Stop 0)"
 
 test "$(cd "$empty_target/wiki" && CLAUDE_PROJECT_DIR="$empty_target" sh -c "$claude_session_start_index_cmd" | python3 -c 'import json,sys; print("Project wiki categories" in json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"])')" = "True"
 test "$(cd "$empty_target/wiki" && CLAUDE_PROJECT_DIR="$empty_target" sh -c "$claude_session_start_git_cmd" | python3 -c 'import json,sys; print("Git status:" in json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"])')" = "True"
-test "$(cd "$empty_target/wiki" && sh -c "$codex_session_start_index_cmd" | python3 -c 'import json,sys; text=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; print("Project wiki categories" in text and "do not add a visible no-op marker" in text)')" = "True"
+test "$(cd "$empty_target/wiki" && sh -c "$codex_session_start_index_cmd" | python3 -c 'import json,sys; text=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; print("Project wiki categories" in text and "No wiki suggestion" in text and "Stop hook" in text)')" = "True"
 test "$(cd "$empty_target/wiki" && sh -c "$codex_session_start_git_cmd" | python3 -c 'import json,sys; print("Git status:" in json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"])')" = "True"
+test "$(cd "$empty_target/wiki" && printf '%s' '{"last_assistant_message":"missing marker","stop_hook_active":false}' | sh -c "$codex_stop_cmd" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("decision") == "block")')" = "True"
 
 echo "PASS: installed Claude and Codex session hooks run from a project subdirectory"
 
@@ -259,6 +261,7 @@ for event_entries in settings.get("hooks", {}).values():
 
 assert any(command == "echo existing codex" for command in commands)
 assert any(".claude/hooks/scripts/wiki_session_start.py" in command for command in commands)
+assert any("wiki_stop_hook.py" in command and "codex" in command for command in commands)
 PY
 
 ls "$existing_target/.codex"/hooks.json.bak.* >/dev/null

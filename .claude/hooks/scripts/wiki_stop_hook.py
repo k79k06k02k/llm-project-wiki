@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""Wiki evaluation enforcer (Stop + PostToolUse pair).
+"""Wiki evaluation enforcer for Claude Code and Codex.
 
-Enforces the commit-time hard trigger from wiki-workflow.md at the tool layer
-instead of by reading prose:
+Claude Code uses the Stop + PostToolUse pair to enforce the commit-time hard
+trigger from wiki-workflow.md:
 
   - `mark-commit` mode (PostToolUse on Bash): when the executed command runs
     `git commit`, set `pending_commit` in the session state file.
   - default mode (Stop): if a commit is pending and the final message carries
-    no wiki evaluation marker, block the stop and ask for the evaluation. A
-    marker clears the flag. Replies that merely *mention* commits never block
-    — the old prose regex (`git commit|commit <hash>`) false-positived on
-    design discussions and command examples, and blocked every long reply.
+    no wiki evaluation marker, block the stop and ask for the evaluation.
+    Replies that merely *mention* commits never block.
 
-Anti-loop: max 2 blocks per turn; the pass-through also clears the flag.
+Codex uses `codex` mode on every Stop event. SessionStart asks the agent to
+output `No wiki suggestion` when no suggestion is needed. A missing marker
+blocks once with a continuation prompt; Codex's `stop_hook_active` flag then
+prevents a loop.
 """
 
 import hashlib
@@ -28,14 +29,50 @@ from pathlib import Path
 # and backslashes are stripped before matching so quoting cannot hide it.
 COMMIT_RE = re.compile(r"\bgit\b[^|&;]*?\bcommit(?![\w-])")
 
-# Wiki evaluation markers (Chinese and English). Flexible on spacing/casing but
-# specific enough not to fire on incidental references to wiki file paths.
-WIKI_EVAL_PATTERN = re.compile(
-    r"Wiki\s*suggestion|No\s+wiki\s+updates\s+needed",
+# A marker must occupy its own visible line outside a Markdown code fence.
+# This prevents prose such as "the docs require No wiki suggestion" from
+# accidentally bypassing the evaluation. The HTML marker remains compatible
+# with conversations started before the visible marker changed.
+WIKI_EVAL_LINE_PATTERN = re.compile(
+    r'^[ \t]*(?:>[ \t]*)*(?:#{1,6}[ \t]+)?(?:'
+    r'(?:\*\*)?Wiki[ \t]+suggestion(?:\*\*)?(?:[ \t]*[:：].*)?|'
+    r'(?:\*\*)?No[ \t]+wiki[ \t]+suggestion(?:\*\*)?|'
+    r'(?:\*\*)?No[ \t]+wiki[ \t]+updates[ \t]+needed(?:\*\*)?|'
+    r'<!--[ \t]*wiki-evaluated[ \t]*-->'
+    r')[ \t]*$',
     re.IGNORECASE,
 )
+FENCE_PATTERN = re.compile(r'^[ \t]*(?:>[ \t]*)*(`{3,}|~{3,})')
 
 MAX_BLOCKS_PER_TURN = 2  # Max blocks per turn (infinite loop prevention)
+
+
+def has_wiki_eval_marker(message: str) -> bool:
+    """Return True for a standalone marker line outside fenced code blocks."""
+    in_fence = False
+    fence_char = ""
+    fence_length = 0
+
+    for line in message.splitlines():
+        fence = FENCE_PATTERN.match(line)
+        if fence:
+            token = fence.group(1)
+            if not in_fence:
+                in_fence = True
+                fence_char = token[0]
+                fence_length = len(token)
+            elif (
+                token[0] == fence_char
+                and len(token) >= fence_length
+                and not line[fence.end():].strip()
+            ):
+                in_fence = False
+            continue
+
+        if not in_fence and WIKI_EVAL_LINE_PATTERN.fullmatch(line):
+            return True
+
+    return False
 
 
 def is_commit_command(command: str) -> bool:
@@ -85,11 +122,13 @@ def mark_commit(data: dict) -> None:
 
 
 def handle_stop(data: dict) -> None:
-    last_msg = data.get("last_assistant_message", "")
+    last_msg = data.get("last_assistant_message")
+    if not isinstance(last_msg, str):
+        last_msg = ""
     path = state_file(data)
 
     # 1. Wiki evaluation marker found — allow stop, clear counter and flag
-    if WIKI_EVAL_PATTERN.search(last_msg):
+    if has_wiki_eval_marker(last_msg):
         write_state(path, {"block_count": 0})
         return
 
@@ -119,17 +158,44 @@ def handle_stop(data: dict) -> None:
     print(json.dumps({"decision": "block", "reason": reason}))
 
 
+def handle_codex_stop(data: dict) -> None:
+    """Require one Wiki evaluation pass before Codex ends a turn."""
+    last_msg = data.get("last_assistant_message")
+    if not isinstance(last_msg, str):
+        last_msg = ""
+
+    if has_wiki_eval_marker(last_msg) or data.get("stop_hook_active") is True:
+        print("{}")
+        return
+
+    reason = (
+        "Wiki evaluation required before ending this turn. Review the work and "
+        "decide whether it produced durable project knowledge that is not "
+        "already obvious from the code.\n"
+        "- If yes: add a visible `Wiki suggestion` with the target page and "
+        "what should be recorded.\n"
+        "- If no: output exactly `No wiki suggestion`."
+    )
+    print(json.dumps({"decision": "block", "reason": reason}))
+
+
 def main() -> None:
+    mode = sys.argv[1] if len(sys.argv) > 1 else ""
     try:
         data = json.load(sys.stdin)
     except Exception:
+        if mode == "codex":
+            print("{}")
         sys.exit(0)  # Cannot parse input — allow
     if not isinstance(data, dict):
+        if mode == "codex":
+            print("{}")
         sys.exit(0)
 
-    mode = sys.argv[1] if len(sys.argv) > 1 else ""
     if mode == "mark-commit":
         mark_commit(data)
+    elif mode == "codex":
+        handle_codex_stop(data)
     else:
         handle_stop(data)
     sys.exit(0)

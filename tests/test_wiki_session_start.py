@@ -127,6 +127,9 @@ class MainFlavorTestCase(unittest.TestCase):
         ctx = self.run_hook("wiki-index", "codex")
         self.assertIn("Codex wiki review rule", ctx)
         self.assertIn("Wiki write policy", ctx)
+        self.assertIn("No wiki suggestion", ctx)
+        self.assertNotIn("<!-- wiki-evaluated -->", ctx)
+        self.assertIn("Stop hook", ctx)
 
     def test_summary_parses_index_table(self):
         ctx = self.run_hook("wiki-index")

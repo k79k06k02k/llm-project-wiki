@@ -14,7 +14,7 @@ The point is not to create another documentation folder. The point is to make pr
 
 - A `wiki/` directory for git-tracked project knowledge.
 - A `SessionStart` hook that loads the wiki index into Claude Code or Codex context.
-- A Claude Code `Stop` hook that nudges the agent to evaluate whether the conversation produced wiki-worthy knowledge.
+- Stop hooks that enforce wiki evaluation after Claude Code commits and before every Codex final response.
 - A repo-scoped `wiki-review` skill for manual review and suggestion flow.
 - A human approval rule so the agent proposes wiki updates instead of silently rewriting the knowledge base.
 - A small install script for copying the template into another repository.
@@ -76,7 +76,7 @@ Please integrate LLM Project Wiki into the current project: https://github.com/k
 Run `scripts/install.sh` from that repository.
 ```
 
-Then open the target project with Claude Code or Codex. On session start, the agent should receive the wiki index as additional context (plus a `⚠ Wiki lint` warning if `wiki_lint.py` finds a broken structural invariant). Claude Code detects commits at the tool layer: a `PostToolUse` hook flags the session when a `git commit` actually runs, and the `Stop` hook then asks for a wiki evaluation only when a commit is pending and no marker was emitted — so ordinary long replies are never blocked. Codex registers no stop hook and relies on injected instructions so the transcript is not polluted by hook feedback. Both tools share one `wiki_session_start.py` script (under `.claude/hooks/scripts/`); the Codex hooks call it with a `codex` flavor argument.
+Then open the target project with Claude Code or Codex. On session start, the agent should receive the wiki index as additional context (plus a `⚠ Wiki lint` warning if `wiki_lint.py` finds a broken structural invariant). Claude Code detects commits at the tool layer: a `PostToolUse` hook flags the session when a `git commit` actually runs, and the `Stop` hook then asks for a wiki evaluation only when a commit is pending and no marker was emitted. Codex checks every final response for a wiki evaluation marker and requests one retry when it is missing. Both tools share the same `wiki_session_start.py` and `wiki_stop_hook.py` scripts under `.claude/hooks/scripts/`.
 
 The installer is designed for existing projects:
 
@@ -94,8 +94,8 @@ Codex discovers repository skills from `.agents/skills`. The checked-in `.agents
 1. `wiki/index.md` is loaded at the start of an agent session.
 2. The agent reads relevant wiki pages before editing related code.
 3. During work, the agent may propose a `Wiki suggestion` when it discovers durable knowledge.
-4. At the end of substantial work, the agent evaluates whether the session produced wiki-worthy knowledge.
-5. The agent proposes a `Wiki suggestion` when there is durable knowledge to record. In Codex, do not add no-op markers solely for the hook; keep the transcript clean.
+4. Before the enforced final response, the agent evaluates whether the session produced wiki-worthy knowledge.
+5. The agent emits `Wiki suggestion` when there is durable knowledge to record; otherwise it emits the client-specific no-update marker.
 6. Human approval is required before any wiki file is created, updated, or deleted (configurable, see below).
 
 This keeps the system boring and auditable. Boring is good here. Unreviewed AI memory is just a more confident way to store mistakes.
@@ -153,12 +153,18 @@ code could have given you.
 
 ## Hook Markers
 
-The Claude Code stop hook looks for either marker in the final assistant response:
+Claude Code checks for either marker after a real commit:
 
 - `Wiki suggestion`
 - `No wiki updates needed`
 
-Codex does not block on missing markers. Codex renders stop-hook blocks as visible Hook feedback and can create marker-only follow-up messages, so Codex intentionally registers no stop hook and relies on the SessionStart instructions instead.
+Codex checks every final response for either marker:
+
+- `Wiki suggestion`
+- `No wiki suggestion`
+
+A marker must occupy its own visible line outside fenced code blocks. If Codex
+misses it, the Stop hook requests one retry; `stop_hook_active` prevents loops.
 
 ## Smoke Test
 
@@ -171,9 +177,10 @@ Run:
 The smoke test verifies that:
 
 - The Claude Code stop hook allows short responses.
-- The Claude Code stop hook blocks substantial responses without a wiki marker.
+- The Claude Code stop hook blocks a pending commit response without a wiki marker.
 - The Claude Code stop hook allows responses containing `Wiki suggestion`.
 - The Claude Code stop hook allows responses containing `No wiki updates needed`.
+- The Codex stop hook blocks a final response without a marker and accepts `No wiki suggestion`.
 - The installer creates Claude Code hooks, Codex hooks, and repo-scoped Codex skill files in a fresh target.
 - Installed session hooks can load wiki and git context from a project subdirectory.
 - Existing Claude Code and Codex hook configs are merged instead of overwritten.
